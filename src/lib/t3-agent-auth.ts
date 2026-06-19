@@ -3,8 +3,9 @@
 // Provides: discovery, token exchange, refresh, introspection, JWKS
 // Each agent authenticates via @agent-auth/sdk against this server
 
-import { SignJWT, jwtVerify, exportJWK, importJWK } from 'jose';
-import { generateEd25519KeyPair, hashData, generateApiKey, type Ed25519KeyPair } from './t3-crypto';
+import { SignJWT, jwtVerify, exportJWK } from 'jose';
+import { generateKeyPairSync, type KeyObject } from 'crypto';
+import { hashData, generateApiKey, type Ed25519KeyPair } from './t3-crypto';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -75,8 +76,8 @@ export interface T3VerifiableCredential {
 // ─── T3 Agent Auth Server ────────────────────────────────────────────────────
 
 class T3AgentAuthServer {
-  private serverKeyPair: Ed25519KeyPair;
-  private serverPrivateKey: Uint8Array;
+  private serverPublicKey: KeyObject;
+  private serverPrivateKey: KeyObject;
   private registeredAgents: Map<string, T3AgentRegistration> = new Map();
   private apiKeys: Map<string, string> = new Map(); // apiKey -> agentId
   private refreshTokens: Map<string, { agentId: string; scope: string; exp: number }> = new Map();
@@ -84,9 +85,9 @@ class T3AgentAuthServer {
   private verifiableCredentials: Map<string, T3VerifiableCredential> = new Map();
 
   constructor() {
-    this.serverKeyPair = generateEd25519KeyPair();
-    // Convert Ed25519 key to Jose-compatible format for JWT signing
-    this.serverPrivateKey = this.serverKeyPair.privateKey;
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+    this.serverPublicKey = publicKey;
+    this.serverPrivateKey = privateKey;
   }
 
   // ─── Discovery Endpoint ──────────────────────────────────────────────────
@@ -135,13 +136,7 @@ class T3AgentAuthServer {
   }
 
   private async getPublicKeyJWK() {
-    // Export public key as JWK for JWKS endpoint
-    const publicKeyBase64 = this.serverKeyPair.publicKeyBase64;
-    return {
-      kty: 'OKP',
-      crv: 'Ed25519',
-      x: publicKeyBase64,
-    };
+    return exportJWK(this.serverPublicKey);
   }
 
   // ─── Agent Registration ──────────────────────────────────────────────────
@@ -280,7 +275,7 @@ class T3AgentAuthServer {
   async introspectToken(token: string): Promise<{ active: boolean; sub?: string; agent_id?: string; scope?: string; exp?: number }> {
     try {
       // Verify the JWT signature using the server's public key
-      const { payload } = await jwtVerify(token, this.serverPrivateKey, {
+      const { payload } = await jwtVerify(token, this.serverPublicKey, {
         audience: 'trustland-platform',
       });
 
@@ -431,8 +426,21 @@ class T3AgentAuthServer {
 // ─── Singleton Instance ──────────────────────────────────────────────────────
 
 // Use globalThis to persist across HMR reloads
-const globalForT3 = globalThis as unknown as { __t3_agent_auth_server: T3AgentAuthServer | undefined };
-export const t3AgentAuthServer = globalForT3.__t3_agent_auth_server || new T3AgentAuthServer();
+const T3_AGENT_AUTH_SERVER_VERSION = 2;
+const globalForT3 = globalThis as unknown as {
+  __t3_agent_auth_server: T3AgentAuthServer | undefined;
+  __t3_agent_auth_server_version?: number;
+};
+
+if (
+  !globalForT3.__t3_agent_auth_server ||
+  globalForT3.__t3_agent_auth_server_version !== T3_AGENT_AUTH_SERVER_VERSION
+) {
+  globalForT3.__t3_agent_auth_server = new T3AgentAuthServer();
+  globalForT3.__t3_agent_auth_server_version = T3_AGENT_AUTH_SERVER_VERSION;
+}
+
+export const t3AgentAuthServer = globalForT3.__t3_agent_auth_server;
 globalForT3.__t3_agent_auth_server = t3AgentAuthServer;
 
 export default t3AgentAuthServer;
