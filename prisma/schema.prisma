@@ -1,0 +1,327 @@
+// TrustLand AI Network - Prisma Schema
+// Enterprise-grade property transaction platform with Terminal 3 Agent Auth
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Terminal 3 Identity & Auth ───────────────────────────────────────────────
+
+model T3Identity {
+  id              String   @id @default(cuid())
+  did             String   @unique          // Decentralized Identifier
+  publicKey       String                    // Public key for verification
+  encryptedKey    String?                   // Encrypted private key (never stored plain)
+  credentialType  String   @default("verified_user") // verified_user, agent, institution, government
+  status          String   @default("active") // active, suspended, revoked
+  verifiedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  agents          Agent[]
+  attestations    TrustAttestation[]
+  ledgerEntries   TrustLedger[]
+  permissions     PermissionGrant[]
+  auditLogs       AuditLog[]
+  sentMessages    AgentMessage[]            @relation("SentMessages")
+  receivedMessages AgentMessage[]           @relation("ReceivedMessages")
+}
+
+model VerifiableCredential {
+  id              String   @id @default(cuid())
+  issuerDid       String                     // Who issued this credential
+  subjectDid      String                     // Who this credential is about
+  credentialType  String                     // identity, ownership, qualification, authorization
+  credentialData  String                     // JSON string of credential claims
+  schemaId        String?                    // Credential schema identifier
+  proof           String                     // Cryptographic proof/signature
+  proofType       String   @default("Ed25519Signature2018")
+  validFrom       DateTime @default(now())
+  validUntil      DateTime?
+  revocationId    String?                    // For revocation registry
+  status          String   @default("active") // active, revoked, expired
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ─── Agent System ─────────────────────────────────────────────────────────────
+
+model Agent {
+  id              String   @id @default(cuid())
+  identityId      String
+  agentType       String                     // buyer, seller, surveyor, lawyer, valuer, financing, registry, verification
+  name            String
+  description     String?
+  capabilities    String                     // JSON array of capabilities
+  status          String   @default("idle")  // idle, active, busy, offline, error
+  trustScore      Float    @default(0.0)     // Dynamic trust score 0-100
+  config          String?                    // JSON config
+  lastActiveAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  identity        T3Identity               @relation(fields: [identityId], references: [id])
+  workflowSteps   WorkflowStep[]
+  delegatedPerms  PermissionGrant[]
+}
+
+model PermissionGrant {
+  id              String   @id @default(cuid())
+  granterDid      String                     // Who granted the permission
+  granteeDid      String                     // Who received the permission
+  agentId         String?                    // Specific agent this applies to
+  permissionType  String                     // search, negotiate, sign, verify, finance, register
+  scope           String?                    // JSON scope definition
+  constraints     String?                    // JSON constraints
+  delegatedAt     DateTime @default(now())
+  expiresAt       DateTime?
+  revokable       Boolean  @default(true)
+  status          String   @default("active") // active, revoked, expired
+  signature       String                     // Cryptographic signature of grant
+
+  identity        T3Identity               @relation(fields: [granterDid], references: [did])
+  agent           Agent?                    @relation(fields: [agentId], references: [id])
+}
+
+// ─── Property & Transactions ─────────────────────────────────────────────────
+
+model Property {
+  id              String   @id @default(cuid())
+  title           String
+  address         String
+  city            String
+  region          String
+  country         String   @default("US")
+  propertyType    String                     // residential, commercial, industrial, agricultural, mixed
+  area            Float                      // Square meters/feet
+  bedrooms        Int?
+  bathrooms       Int?
+  yearBuilt       Int?
+  askingPrice     Float
+  currency        String   @default("USD")
+  description     String?
+  features        String?                    // JSON array
+  images          String?                    // JSON array of image URLs
+  ownerDid        String                     // Owner's decentralized identifier
+  titleDeedRef    String?                    // Title deed reference number
+  registryRef     String?                    // Government registry reference
+  verificationStatus String @default("pending") // pending, verified, flagged, rejected
+  trustScore      Float    @default(0.0)
+  status          String   @default("available") // available, under_offer, sold, withdrawn
+  lat             Float?
+  lng             Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  listings        PropertyListing[]
+  transactions    Transaction[]
+  documents       Document[]
+  riskReports     RiskReport[]
+}
+
+model PropertyListing {
+  id              String   @id @default(cuid())
+  propertyId      String
+  sellerAgentId   String
+  listingType     String   @default("sale")  // sale, auction
+  price           Float
+  currency        String   @default("USD")
+  availableFrom   DateTime?
+  availableUntil  DateTime?
+  terms           String?                    // JSON terms
+  status          String   @default("active") // active, paused, completed, cancelled
+  viewCount       Int      @default(0)
+  inquiryCount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  property        Property                 @relation(fields: [propertyId], references: [id])
+}
+
+model Transaction {
+  id              String   @id @default(cuid())
+  propertyId      String
+  buyerDid        String
+  sellerDid       String
+  buyerAgentId    String?
+  sellerAgentId   String?
+  amount          Float
+  currency        String   @default("USD")
+  status          String   @default("initiated") // initiated, negotiating, due_diligence, financing, legal_review, registry_check, completion, completed, failed, cancelled
+  currentStep     Int      @default(1)
+  totalSteps      Int      @default(12)
+  signedOffer     String?                    // JSON signed offer document
+  completionDate  DateTime?
+  riskLevel       String   @default("medium") // low, medium, high, critical
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  property        Property                 @relation(fields: [propertyId], references: [id])
+  workflow        Workflow?
+  ledgerEntries   TrustLedger[]
+  auditLogs       AuditLog[]
+}
+
+// ─── Due Diligence & Documents ────────────────────────────────────────────────
+
+model Document {
+  id              String   @id @default(cuid())
+  propertyId      String?
+  transactionId   String?
+  uploaderDid     String
+  documentType    String                     // title_deed, survey_map, sale_agreement, valuation_report, identity_proof, bank_statement, tax_record
+  fileName        String
+  fileHash        String                     // SHA-256 hash for integrity
+  fileSize        Int
+  mimeType        String
+  extractedData   String?                    // JSON extracted data
+  verificationStatus String @default("pending") // pending, verified, flagged, rejected
+  anomalies       String?                    // JSON array of detected anomalies
+  ocrConfidence   Float?
+  uploadedAt      DateTime @default(now())
+  verifiedAt      DateTime?
+
+  property        Property?                @relation(fields: [propertyId], references: [id])
+}
+
+model RiskReport {
+  id              String   @id @default(cuid())
+  propertyId      String
+  transactionId   String?
+  generatedBy     String                     // Agent DID
+  reportType      String                     // full, title, survey, valuation, compliance
+  riskScore       Float                      // 0-100
+  riskLevel       String                     // low, medium, high, critical
+  findings        String                     // JSON array of findings
+  recommendations String                     // JSON array of recommendations
+  dataSources     String?                    // JSON array of data sources used
+  generatedAt     DateTime @default(now())
+  expiresAt       DateTime?
+
+  property        Property                 @relation(fields: [propertyId], references: [id])
+}
+
+// ─── Workflow & Orchestration ─────────────────────────────────────────────────
+
+model Workflow {
+  id              String   @id @default(cuid())
+  transactionId   String  @unique
+  workflowType    String   @default("property_transaction")
+  definition      String                     // JSON workflow definition (LangGraph-style)
+  currentState    String                     // Current state in the state machine
+  context         String?                    // JSON workflow context/state
+  status          String   @default("pending") // pending, active, paused, completed, failed
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  transaction     Transaction               @relation(fields: [transactionId], references: [id])
+  steps           WorkflowStep[]
+}
+
+model WorkflowStep {
+  id              String   @id @default(cuid())
+  workflowId      String
+  agentId         String?
+  stepType        String                     // authenticate, search, negotiate, verify, value, legal, finance, register, sign, complete
+  stepOrder       Int
+  stepName        String
+  description     String?
+  inputSchema     String?                    // JSON schema for step input
+  outputData      String?                    // JSON output data
+  status          String   @default("pending") // pending, active, completed, failed, skipped
+  startedAt       DateTime?
+  completedAt     DateTime?
+  signature       String?                    // Cryptographic signature of step execution
+  error           String?
+
+  workflow        Workflow                  @relation(fields: [workflowId], references: [id])
+  agent           Agent?                    @relation(fields: [agentId], references: [id])
+}
+
+// ─── Trust Ledger (Append-Only) ──────────────────────────────────────────────
+
+model TrustLedger {
+  id              String   @id @default(cuid())
+  identityId      String
+  eventType       String                     // agent_action, identity_proof, permission_grant, verification_event, transaction_approval, attestation, delegation
+  eventHash       String                     // SHA-256 hash of event data
+  previousHash    String?                    // Chain to previous entry
+  actorDid        String                     // Who performed the action
+  targetDid       String?                    // Who was affected
+  transactionId   String?
+  agentId         String?
+  eventData       String                     // JSON event data
+  signature       String                     // Cryptographic signature
+  blockNumber     Int                        // Sequential block number
+  timestamp       DateTime @default(now())
+
+  identity        T3Identity               @relation(fields: [identityId], references: [id])
+  transaction     Transaction?              @relation(fields: [transactionId], references: [id])
+}
+
+// ─── Trust Attestations ──────────────────────────────────────────────────────
+
+model TrustAttestation {
+  id              String   @id @default(cuid())
+  attesterDid     String                     // Who provides the attestation
+  subjectDid      String                     // Who the attestation is about
+  identityId      String
+  attestationType String                     // identity_verification, ownership_proof, behavior_attestation, registry_validation
+  claim           String                     // JSON claim data
+  confidence      Float                      // 0.0 - 1.0
+  evidence        String?                    // JSON evidence
+  signature       String                     // Cryptographic signature
+  validFrom       DateTime @default(now())
+  validUntil      DateTime?
+  status          String   @default("active") // active, revoked, disputed
+  createdAt       DateTime @default(now())
+
+  identity        T3Identity               @relation(fields: [identityId], references: [id])
+}
+
+// ─── Agent Communication ─────────────────────────────────────────────────────
+
+model AgentMessage {
+  id              String   @id @default(cuid())
+  senderDid       String
+  receiverDid     String
+  senderIdentityId String
+  receiverIdentityId String
+  messageType     String                     // inquiry, offer, counter_offer, verification_request, approval, rejection, notification
+  subject         String
+  content         String                     // JSON message content
+  relatedTransactionId String?
+  priority        String   @default("normal") // low, normal, high, urgent
+  signature       String                     // Message signature
+  readAt          DateTime?
+  createdAt       DateTime @default(now())
+
+  sender          T3Identity               @relation("SentMessages", fields: [senderIdentityId], references: [id])
+  receiver        T3Identity               @relation("ReceivedMessages", fields: [receiverIdentityId], references: [id])
+}
+
+// ─── Audit Logging ───────────────────────────────────────────────────────────
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  identityId      String
+  transactionId   String?
+  action          String                     // login, agent_create, permission_grant, transaction_init, document_upload, verification, signature
+  actorDid        String
+  target          String?                    // What was acted upon
+  details         String?                    // JSON details
+  ipAddress       String?
+  userAgent       String?
+  riskLevel       String   @default("low")  // low, medium, high, critical
+  timestamp       DateTime @default(now())
+
+  identity        T3Identity               @relation(fields: [identityId], references: [id])
+  transaction     Transaction?              @relation(fields: [transactionId], references: [id])
+}
