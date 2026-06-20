@@ -122,6 +122,8 @@ model Property {
   transactions    Transaction[]
   documents       Document[]
   riskReports     RiskReport[]
+  verifications    PropertyVerification[]
+  dueDiligenceReports DueDiligenceReport[]
 }
 
 model PropertyListing {
@@ -165,6 +167,7 @@ model Transaction {
   workflow        Workflow?
   ledgerEntries   TrustLedger[]
   auditLogs       AuditLog[]
+  events          TransactionEvent[]
 }
 
 // ─── Due Diligence & Documents ────────────────────────────────────────────────
@@ -243,6 +246,52 @@ model WorkflowStep {
 
   workflow        Workflow                  @relation(fields: [workflowId], references: [id])
   agent           Agent?                    @relation(fields: [agentId], references: [id])
+}
+
+// ─── Property Verification & Due Diligence ──────────────────────────────────
+
+model PropertyVerification {
+  id              String   @id @default(cuid())
+  propertyId      String
+  verifierId      String                     // Agent DID that performed verification
+  verificationStatus String @default("pending") // pending, in_progress, completed, failed, flagged
+  verificationType String                     // ownership, title_deed, land_survey, compliance, full
+  verificationNotes String?
+  findings        String                     // JSON array of findings
+  documentsReviewed String?                   // JSON array of document IDs
+  riskScore       Float    @default(0.0)      // 0-100
+  // ── T3 Integration ──
+  t3AccessTokenJti String?                    // JWT ID proving auth at time of verification
+  t3AgentAuthVerified Boolean @default(false)
+  teeAttestationId String?                    // TEE attestation reference
+  signature       String                     // Ed25519 signature
+  signatureType   String   @default("Ed25519Signature2020")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  property        Property                  @relation(fields: [propertyId], references: [id])
+}
+
+model DueDiligenceReport {
+  id              String   @id @default(cuid())
+  propertyId      String
+  generatedBy     String                     // Agent DID
+  riskScore       Float                      // 0-100
+  summary         String
+  findings        String                     // JSON array of findings
+  recommendations String                     // JSON array
+  verificationIds String?                    // JSON array of PropertyVerification IDs
+  // ── T3 Integration ──
+  t3AccessTokenJti String?
+  teeAttestationId String?
+  signature       String
+  signatureType   String   @default("Ed25519Signature2020")
+  dataSources     String?                    // JSON array
+  overallRiskLevel String  @default("medium") // low, medium, high, critical
+  confidenceScore Float   @default(0.0)       // 0-1
+  createdAt       DateTime @default(now())
+
+  property        Property                  @relation(fields: [propertyId], references: [id])
 }
 
 // ─── Trust Ledger (Append-Only) ──────────────────────────────────────────────
@@ -324,4 +373,71 @@ model AuditLog {
 
   identity        T3Identity               @relation(fields: [identityId], references: [id])
   transaction     Transaction?              @relation(fields: [transactionId], references: [id])
+}
+
+// ─── Trust Score Engine ───────────────────────────────────────────────────────
+
+model TrustProfile {
+  id                      String   @id @default(cuid())
+  entityType              String                     // user, seller, agent, property
+  entityId                String                     // DID for users/agents, property ID for properties
+  trustScore              Float    @default(50.0)    // 0-100 calculated score
+  verificationCount       Int      @default(0)
+  successfulTransactions  Int      @default(0)
+  disputes                Int      @default(0)
+  fraudReports            Int      @default(0)
+  lastUpdated             DateTime @default(now())
+  createdAt               DateTime @default(now())
+
+  // Scoring breakdown (stored as JSON for flexibility)
+  identityVerified        Boolean  @default(false)
+  ownershipVerified       Boolean  @default(false)
+  completedTransactionsScore Int  @default(0)
+  positiveReviews         Int      @default(0)
+  accountAgeDays          Int      @default(0)
+  historicalDisputes      Int      @default(0)
+  successfulWorkflows     Int      @default(0)
+  verificationAccuracy    Float    @default(0.0)    // 0-1
+  userRating              Float    @default(0.0)    // 0-100
+
+  @@unique([entityType, entityId])
+}
+
+// ─── Transaction Workflow Events ──────────────────────────────────────────────
+
+model TransactionEvent {
+  id              String   @id @default(cuid())
+  transactionId   String
+  eventType       String                     // stage_change, document_added, agent_action, approval, rejection
+  actorId         String                     // DID of who triggered the event
+  actorType       String                     // user, agent, system
+  metadata        String                     // JSON metadata
+  timestamp       DateTime @default(now())
+  // ── T3 Integration ──
+  signature       String                     // Ed25519 signature
+  signatureType   String   @default("Ed25519Signature2020")
+  t3AccessTokenJti String?                   // JWT ID proving auth at time of event
+
+  transaction     Transaction               @relation(fields: [transactionId], references: [id])
+}
+
+// ─── Immutable Audit Ledger ──────────────────────────────────────────────────
+
+model AuditLedgerEntry {
+  id              String   @id @default(cuid())
+  actorId         String                     // DID of the actor
+  actorType       String                     // user, agent, system
+  action          String                     // login, verification, property_creation, transaction_update, agent_action, document_upload
+  resourceType    String                     // identity, property, transaction, agent, document, verification
+  resourceId      String
+  metadata        String?                    // JSON metadata
+  hash            String                     // SHA-256 hash of this entry
+  previousHash    String?                    // Hash of previous entry (chain)
+  blockNumber     Int                        // Sequential block number
+  timestamp       DateTime @default(now())
+  // ── T3 Integration ──
+  signature       String                     // Ed25519 signature
+  signatureType   String   @default("Ed25519Signature2020")
+  t3AccessTokenJti String?
+  t3AgentAuthVerified Boolean @default(false)
 }

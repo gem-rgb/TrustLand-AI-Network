@@ -7,85 +7,138 @@ import { useTrustLandStore, ViewType } from '@/lib/store';
 import {
   Shield, LayoutDashboard, Bot, BookOpen, ArrowRightLeft,
   FileSearch, Star, MessageSquare, Users, Activity,
-  ChevronRight, Lock, Zap, CheckCircle2, Key, Fingerprint
+  ChevronRight, Lock, Zap, CheckCircle2, Key, Fingerprint,
+  ClipboardCheck, AlertTriangle, Clock, Eye, Plus, FileText
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Toaster, toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import PropertySearchView from './PropertySearchView';
+import AuthView from './AuthView';
+import AiParcelUpload from './AiParcelUpload';
 
 const NAV_ITEMS: Array<{ view: ViewType; label: string; icon: React.ReactNode; badge?: string }> = [
-  { view: 'overview', label: 'Overview', icon: <Shield className="h-4 w-4" /> },
+  { view: 'overview', label: 'Explore Properties', icon: <Shield className="h-4 w-4" /> },
+  { view: 'auth', label: 'Verify / Sign In', icon: <Lock className="h-4 w-4" /> },
   { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
+  { view: 'analytics', label: 'Analytics', icon: <Activity className="h-4 w-4" /> },
   { view: 'agents', label: 'Agent Marketplace', icon: <Bot className="h-4 w-4" /> },
   { view: 'ledger', label: 'Trust Ledger', icon: <BookOpen className="h-4 w-4" /> },
+  { view: 'audit-ledger', label: 'Audit Ledger', icon: <FileText className="h-4 w-4" /> },
   { view: 'transactions', label: 'Transactions', icon: <ArrowRightLeft className="h-4 w-4" /> },
   { view: 'diligence', label: 'Due Diligence', icon: <FileSearch className="h-4 w-4" /> },
   { view: 'trust-score', label: 'Trust Scores', icon: <Star className="h-4 w-4" /> },
+  { view: 'trust-engine', label: 'Trust Engine', icon: <Zap className="h-4 w-4" />, badge: 'NEW' },
   { view: 'messages', label: 'Messages', icon: <MessageSquare className="h-4 w-4" /> },
   { view: 'identities', label: 'Identities', icon: <Users className="h-4 w-4" /> },
+  { view: 'verification', label: 'Verification', icon: <ClipboardCheck className="h-4 w-4" /> },
   { view: 'autonomous-purchase', label: 'Autonomous Purchase', icon: <Zap className="h-4 w-4" />, badge: 'T3' },
 ];
 
+// ─── Error Boundary ──────────────────────────────────────────────────────────
+class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center">
+          <AlertTriangle className="h-12 w-12 mx-auto text-amber-500 mb-4" />
+          <h2 className="text-xl font-bold mb-2">View Error</h2>
+          <p className="text-muted-foreground mb-4">{this.state.error?.message || 'An unexpected error occurred'}</p>
+          <Button onClick={() => this.setState({ hasError: false, error: null })}>Retry</Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function TrustLandLayout() {
-  const { currentView, setCurrentView, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, dashboardStats, addLiveActivity } = useTrustLandStore();
+  const { currentView, setCurrentView, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, dashboardStats, addLiveActivity } = useTrustLandStore();
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const socketRef = useRef<Socket | null>(null);
 
-  // Initial data load
+  // Initial data load — staggered to avoid overwhelming the dev server
   const loadAllData = useCallback(async () => {
-    await Promise.all([
-      fetchDashboardStats(),
-      fetchIdentities(),
-      fetchAgents(),
-      fetchProperties(),
-      fetchTransactions(),
-      fetchTrustLedger(),
-      fetchDocuments(),
-      fetchMessages(),
-      fetchAttestations(),
-    ]);
-  }, [fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations]);
+    const fetchers = [
+      fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties,
+      fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages,
+      fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages,
+      fetchTrustProfiles,
+    ];
+    // Stagger in batches of 3 to avoid overloading the server
+    for (let i = 0; i < fetchers.length; i += 3) {
+      const batch = fetchers.slice(i, i + 3);
+      await Promise.all(batch.map(fn => fn()));
+    }
+  }, [fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles]);
 
   useEffect(() => {
     loadAllData();
 
-    // Connect to WebSocket
-    const newSocket = io('/?XTransformPort=3030', { transports: ['websocket', 'polling'] });
-    socketRef.current = newSocket;
+    // Connect to WebSocket (with error handling to prevent crashes)
+    try {
+      const newSocket = io('/?XTransformPort=3000', {
+        transports: ['websocket', 'polling'],
+        reconnectionAttempts: 3,
+        timeout: 5000,
+      });
+      socketRef.current = newSocket;
 
-    newSocket.on('ledger_update', () => {
-      fetchTrustLedger();
-    });
+      newSocket.on('connect_error', () => {
+        // WebSocket server not available — non-critical, app works without it
+      });
 
-    newSocket.on('agent_activity', (data: { agentId: string; action: string }) => {
-      addLiveActivity({ agentId: data.agentId, action: data.action, timestamp: new Date().toISOString() });
-    });
+      newSocket.on('ledger_update', () => {
+        fetchTrustLedger();
+      });
 
-    newSocket.on('document_processed', (data: { fileName: string; verificationStatus: string }) => {
-      toast.success(`Document processed: ${data.fileName}`, { description: `Status: ${data.verificationStatus}` });
-      fetchDocuments();
-    });
+      newSocket.on('agent_activity', (data: { agentId: string; action: string }) => {
+        addLiveActivity({ agentId: data.agentId, action: data.action, timestamp: new Date().toISOString() });
+      });
 
-    newSocket.on('workflow_step_completed', () => {
-      fetchTransactions();
-    });
+      newSocket.on('document_processed', (data: { fileName: string; verificationStatus: string }) => {
+        toast.success(`Document processed: ${data.fileName}`, { description: `Status: ${data.verificationStatus}` });
+        fetchDocuments();
+      });
 
-    newSocket.on('agent_message', () => {
-      fetchMessages();
-    });
+      newSocket.on('workflow_step_completed', () => {
+        fetchTransactions();
+      });
+
+      newSocket.on('agent_message', () => {
+        fetchMessages();
+      });
+    } catch {
+      // WebSocket initialization failed — non-critical
+      socketRef.current = null;
+    }
 
     // Auto-refresh every 30s
     const interval = setInterval(loadAllData, 30000);
     return () => {
       clearInterval(interval);
-      newSocket.disconnect();
+      if (socketRef.current) socketRef.current.disconnect();
     };
   }, []);
 
   const renderView = () => {
     switch (currentView) {
-      case 'overview': return <OverviewView />;
+      case 'overview': return <PropertySearchView />;
+      case 'auth': return <AuthView />;
       case 'dashboard': return <DashboardView />;
       case 'agents': return <AgentMarketplace />;
       case 'ledger': return <TrustLedgerView />;
@@ -94,24 +147,48 @@ export default function TrustLandLayout() {
       case 'trust-score': return <TrustScoreView />;
       case 'messages': return <MessagesView />;
       case 'identities': return <IdentitiesView />;
+      case 'verification': return <VerificationDashboardView />;
+      case 'trust-engine': return <TrustEngineView />;
+      case 'audit-ledger': return <AuditLedgerDashboard />;
+      case 'analytics': return <AnalyticsDashboard />;
       case 'autonomous-purchase': return <AutonomousPurchaseView />;
-      default: return <OverviewView />;
+      default: return <PropertySearchView />;
     }
   };
 
+  // The property search landing view is a full-screen map experience
+  // (no left sidebar, dark blue hero) — render it standalone, outside
+  // the sidebar shell, so it matches the TrustLand product demo layout.
+  if (currentView === 'overview') {
+    return (
+      <ViewErrorBoundary>
+        <PropertySearchView />
+      </ViewErrorBoundary>
+    );
+  }
+
+  // The Auth/Verification view is also a full-screen flow outside the sidebar.
+  if (currentView === 'auth') {
+    return (
+      <ViewErrorBoundary>
+        <AuthView />
+      </ViewErrorBoundary>
+    );
+  }
+
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="min-h-screen flex bg-[#0a1f44] text-white">
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} border-r border-border bg-card transition-all duration-300 flex flex-col`}>
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} border-r border-white/10 bg-[#0c2350] transition-all duration-300 flex flex-col`}>
         {/* Logo */}
-        <div className="p-4 flex items-center gap-3 border-b border-border">
-          <div className="h-8 w-8 rounded-lg bg-emerald-600 flex items-center justify-center flex-shrink-0">
+        <div className="p-4 flex items-center gap-3 border-b border-white/10">
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-orange-500 via-red-500 to-rose-600 flex items-center justify-center flex-shrink-0 shadow-lg">
             <Shield className="h-5 w-5 text-white" />
           </div>
           {sidebarOpen && (
             <div className="overflow-hidden">
-              <h1 className="text-sm font-bold tracking-tight">TrustLand AI</h1>
-              <p className="text-[10px] text-muted-foreground">Terminal 3 Auth Network</p>
+              <h1 className="text-sm font-bold tracking-tight text-white">TrustLand AI</h1>
+              <p className="text-[10px] text-orange-300 tracking-wider uppercase">Terminal 3 Auth Network</p>
             </div>
           )}
         </div>
@@ -123,35 +200,41 @@ export default function TrustLandLayout() {
               <Button
                 key={item.view}
                 variant={currentView === item.view ? 'secondary' : 'ghost'}
-                className={`w-full justify-start gap-3 h-9 text-sm ${!sidebarOpen ? 'px-2' : ''}`}
+                className={cn(
+                  'w-full justify-start gap-3 h-9 text-sm border-0',
+                  !sidebarOpen && 'px-2',
+                  currentView === item.view
+                    ? 'bg-orange-500/20 text-orange-300 hover:bg-orange-500/30 hover:text-orange-200'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white'
+                )}
                 onClick={() => setCurrentView(item.view)}
               >
                 {item.icon}
                 {sidebarOpen && <span>{item.label}</span>}
-                {sidebarOpen && item.badge && <Badge variant="secondary" className="ml-auto text-[10px]">{item.badge}</Badge>}
+                {sidebarOpen && item.badge && <Badge variant="secondary" className="ml-auto text-[10px] bg-orange-500 text-white border-0">{item.badge}</Badge>}
               </Button>
             ))}
           </nav>
         </ScrollArea>
 
         {/* Status Footer */}
-        <div className="p-3 border-t border-border">
+        <div className="p-3 border-t border-white/10">
           <Button
             variant="ghost"
             size="sm"
-            className="w-full"
+            className="w-full text-white/60 hover:bg-white/10 hover:text-white"
             onClick={() => setSidebarOpen(!sidebarOpen)}
           >
             <ChevronRight className={`h-4 w-4 transition-transform ${sidebarOpen ? 'rotate-180' : ''}`} />
           </Button>
           {sidebarOpen && dashboardStats && (
-            <div className="mt-2 text-[10px] text-muted-foreground space-y-1">
+            <div className="mt-2 text-[10px] text-white/50 space-y-1">
               <div className="flex items-center gap-1">
-                <Lock className="h-3 w-3 text-emerald-500" />
+                <Lock className="h-3 w-3 text-orange-400" />
                 <span>Zero-Trust Active</span>
               </div>
               <div className="flex items-center gap-1">
-                <Activity className="h-3 w-3 text-emerald-500" />
+                <Activity className="h-3 w-3 text-orange-400" />
                 <span>Ledger Height: {dashboardStats.blockHeight}</span>
               </div>
             </div>
@@ -160,17 +243,19 @@ export default function TrustLandLayout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        {renderView()}
+      <main className="flex-1 overflow-auto bg-[#0a1f44]">
+        <ViewErrorBoundary>
+          {renderView()}
+        </ViewErrorBoundary>
       </main>
 
-      <Toaster />
     </div>
   );
 }
 
-// ─── Overview / Hero View ──────────────────────────────────────────────────
-
+// ─── Overview / Hero View (legacy — kept for reference, replaced by PropertySearchView) ───
+// @deprecated Use PropertySearchView as the default landing experience.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function OverviewView() {
   const { setCurrentView, dashboardStats } = useTrustLandStore();
 
@@ -295,51 +380,69 @@ function OverviewView() {
 function DashboardView() {
   const { dashboardStats, agents, transactions, trustLedger } = useTrustLandStore();
 
-  if (!dashboardStats) return <div className="p-8">Loading dashboard...</div>;
+  if (!dashboardStats) return (
+    <div className="p-8 text-center text-white">
+      <Activity className="h-12 w-12 mx-auto text-orange-400 mb-4 animate-pulse" />
+      <h2 className="text-xl font-bold">Loading Dashboard</h2>
+      <p className="text-white/60">Connecting to TrustLand AI Network...</p>
+    </div>
+  );
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 text-white">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Enterprise Dashboard</h1>
-          <p className="text-muted-foreground text-sm">Real-time monitoring of agents, transactions, and trust infrastructure</p>
+          <p className="text-white/60 text-sm">Real-time monitoring of agents, transactions, and trust infrastructure</p>
         </div>
-        <Badge variant="outline" className="border-emerald-500 text-emerald-600"><Activity className="h-3 w-3 mr-1" /> Live</Badge>
+        <Badge className="bg-orange-500/20 text-orange-300 border border-orange-500/30">
+          <Activity className="h-3 w-3 mr-1" /> Live
+        </Badge>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Active Agents', value: dashboardStats.activeAgents, total: dashboardStats.totalAgents, color: 'text-emerald-600' },
-          { label: 'Active Transactions', value: dashboardStats.activeTransactions, total: dashboardStats.totalTransactions, color: 'text-teal-600' },
-          { label: 'Avg Trust Score', value: `${dashboardStats.averageTrustScore}%`, total: null, color: 'text-amber-600' },
-          { label: 'Ledger Block Height', value: dashboardStats.blockHeight, total: null, color: 'text-violet-600' },
+          { label: 'Active Agents', value: dashboardStats.activeAgents, total: dashboardStats.totalAgents, accent: 'from-orange-500 to-red-500', icon: <Bot className="h-4 w-4" /> },
+          { label: 'Active Transactions', value: dashboardStats.activeTransactions, total: dashboardStats.totalTransactions, accent: 'from-blue-500 to-indigo-500', icon: <Activity className="h-4 w-4" /> },
+          { label: 'Avg Trust Score', value: `${dashboardStats.averageTrustScore}%`, total: null, accent: 'from-amber-500 to-orange-500', icon: <Shield className="h-4 w-4" /> },
+          { label: 'Ledger Block Height', value: dashboardStats.blockHeight, total: null, accent: 'from-emerald-500 to-teal-500', icon: <BookOpen className="h-4 w-4" /> },
         ].map((kpi, i) => (
-          <div key={i} className="border border-border rounded-xl p-4 bg-card">
-            <p className="text-xs text-muted-foreground mb-1">{kpi.label}</p>
-            <p className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</p>
-            {kpi.total !== null && <p className="text-xs text-muted-foreground">of {kpi.total} total</p>}
+          <div key={i} className="relative overflow-hidden rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+            <div className={cn('absolute -top-8 -right-8 h-20 w-20 rounded-full bg-gradient-to-br opacity-20 blur-xl', kpi.accent)} />
+            <div className="relative">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-white/60">{kpi.label}</p>
+                <div className={cn('h-7 w-7 rounded-lg bg-gradient-to-br flex items-center justify-center text-white', kpi.accent)}>
+                  {kpi.icon}
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-white">{kpi.value}</p>
+              {kpi.total !== null && <p className="text-xs text-white/50">of {kpi.total} total</p>}
+            </div>
           </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Agent Status */}
-        <div className="border border-border rounded-xl p-5 bg-card">
-          <h3 className="font-semibold mb-4 flex items-center gap-2"><Bot className="h-4 w-4" /> Agent Status Monitor</h3>
-          <div className="space-y-3 max-h-80 overflow-y-auto">
+        <div className="border border-white/10 rounded-xl p-5 bg-white/5 backdrop-blur-sm">
+          <h3 className="font-semibold mb-4 flex items-center gap-2">
+            <Bot className="h-4 w-4 text-orange-400" /> Agent Status Monitor
+          </h3>
+          <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
             {agents.map(agent => (
-              <div key={agent.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+              <div key={agent.id} className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 transition border border-white/5">
                 <div className="flex items-center gap-3">
-                  <div className={`h-2 w-2 rounded-full ${agent.status === 'active' || agent.status === 'busy' ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                  <div className={`h-2 w-2 rounded-full ${agent.status === 'active' || agent.status === 'busy' ? 'bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400/50' : 'bg-white/30'}`} />
                   <div>
-                    <p className="text-sm font-medium">{agent.name}</p>
-                    <p className="text-xs text-muted-foreground">{agent.agentType}</p>
+                    <p className="text-sm font-medium text-white">{agent.name}</p>
+                    <p className="text-xs text-white/50">{agent.agentType}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">{agent.status}</Badge>
-                  <span className="text-xs font-medium text-emerald-600">{agent.trustScore}%</span>
+                  <Badge variant="outline" className="text-[10px] border-white/20 text-white/70">{agent.status}</Badge>
+                  <span className="text-xs font-semibold text-orange-400">{agent.trustScore}%</span>
                 </div>
               </div>
             ))}
@@ -347,19 +450,21 @@ function DashboardView() {
         </div>
 
         {/* Recent Ledger */}
-        <div className="border border-border rounded-xl p-5 bg-card">
-          <h3 className="font-semibold mb-4 flex items-center gap-2"><BookOpen className="h-4 w-4" /> Recent Trust Ledger</h3>
-          <div className="space-y-2 max-h-80 overflow-y-auto">
+        <div className="border border-white/10 rounded-xl p-5 bg-white/5 backdrop-blur-sm">
+          <h3 className="font-semibold mb-4 flex items-center gap-2">
+            <BookOpen className="h-4 w-4 text-orange-400" /> Recent Trust Ledger
+          </h3>
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
             {trustLedger.slice(0, 10).map(entry => (
-              <div key={entry.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50">
-                <span className="text-[10px] font-mono text-muted-foreground mt-1">#{entry.blockNumber}</span>
+              <div key={entry.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-white/5 transition">
+                <span className="text-[10px] font-mono text-orange-300/80 mt-1 bg-orange-500/10 px-1.5 py-0.5 rounded">#{entry.blockNumber}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{entry.eventType.replace(/_/g, ' ')}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">
+                  <p className="text-xs font-medium truncate text-white">{entry.eventType.replace(/_/g, ' ')}</p>
+                  <p className="text-[10px] text-white/50 truncate">
                     {entry.actorDid.slice(0, 20)}... → {entry.eventData.action || entry.eventData.credentialType || ''}
                   </p>
                 </div>
-                <span className="text-[10px] text-muted-foreground">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                <span className="text-[10px] text-white/40 whitespace-nowrap">{new Date(entry.timestamp).toLocaleTimeString()}</span>
               </div>
             ))}
           </div>
@@ -369,16 +474,16 @@ function DashboardView() {
       {/* Infrastructure Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
-          { label: 'Verifiable Credentials', value: dashboardStats.verifiableCredentials, icon: <Shield className="h-4 w-4" /> },
-          { label: 'Active Permissions', value: dashboardStats.activePermissions, icon: <Lock className="h-4 w-4" /> },
-          { label: 'Attestations', value: dashboardStats.attestations, icon: <Star className="h-4 w-4" /> },
-          { label: 'Documents', value: dashboardStats.documents, icon: <FileSearch className="h-4 w-4" /> },
-          { label: 'Audit Logs', value: dashboardStats.auditLogs, icon: <BookOpen className="h-4 w-4" /> },
+          { label: 'Verifiable Credentials', value: dashboardStats.verifiableCredentials, icon: <Shield className="h-4 w-4" />, accent: 'text-orange-400' },
+          { label: 'Active Permissions', value: dashboardStats.activePermissions, icon: <Lock className="h-4 w-4" />, accent: 'text-blue-400' },
+          { label: 'Attestations', value: dashboardStats.attestations, icon: <Star className="h-4 w-4" />, accent: 'text-amber-400' },
+          { label: 'Documents', value: dashboardStats.documents, icon: <FileSearch className="h-4 w-4" />, accent: 'text-emerald-400' },
+          { label: 'Audit Logs', value: dashboardStats.auditLogs, icon: <BookOpen className="h-4 w-4" />, accent: 'text-violet-400' },
         ].map((s, i) => (
-          <div key={i} className="border border-border rounded-lg p-3 text-center bg-card">
-            <div className="text-muted-foreground mb-1 flex justify-center">{s.icon}</div>
-            <p className="text-lg font-bold">{s.value}</p>
-            <p className="text-[10px] text-muted-foreground">{s.label}</p>
+          <div key={i} className="border border-white/10 rounded-lg p-3 text-center bg-white/5 backdrop-blur-sm hover:bg-white/10 transition">
+            <div className={`${s.accent} mb-1 flex justify-center`}>{s.icon}</div>
+            <p className="text-lg font-bold text-white">{s.value}</p>
+            <p className="text-[10px] text-white/50">{s.label}</p>
           </div>
         ))}
       </div>
@@ -389,9 +494,14 @@ function DashboardView() {
 // ─── Agent Marketplace ─────────────────────────────────────────────────────
 
 function AgentMarketplace() {
-  const { agents, identities, delegateAuthority } = useTrustLandStore();
+  const { agents, identities, delegateAuthority, assignAgent, transactions, fetchAgentActivity, transactionEvents } = useTrustLandStore();
   const [selectedAgent, setSelectedAgent] = React.useState<string | null>(null);
   const [delegating, setDelegating] = React.useState(false);
+  const [typeFilter, setTypeFilter] = React.useState<string>('all');
+  const [assignDialogOpen, setAssignDialogOpen] = React.useState(false);
+  const [selectedTxId, setSelectedTxId] = React.useState<string>('');
+  const [assignRole, setAssignRole] = React.useState<string>('');
+  const [aiUploadOpen, setAiUploadOpen] = React.useState(false);
 
   const buyerIdentity = identities.find(i => i.profile.role === 'buyer');
 
@@ -401,6 +511,13 @@ function AgentMarketplace() {
     await delegateAuthority(agentId, buyerIdentity.did, ['search', 'negotiate', 'sign']);
     setDelegating(false);
     toast.success('Authority delegated successfully');
+  };
+
+  const handleAssign = async () => {
+    if (!selectedAgent || !selectedTxId) return;
+    const result = await assignAgent(selectedAgent, selectedTxId, assignRole || 'reviewer');
+    setAssignDialogOpen(false);
+    toast.success(`Agent assigned to transaction`);
   };
 
   const agentTypeColors: Record<string, string> = {
@@ -414,47 +531,172 @@ function AgentMarketplace() {
     verification: 'bg-orange-100 text-orange-700',
   };
 
+  const agentTypes = ['all', ...new Set(agents.map(a => a.agentType))];
+  const filteredAgents = typeFilter === 'all' ? agents : agents.filter(a => a.agentType === typeFilter);
+  const selectedAgentData = agents.find(a => a.id === selectedAgent);
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Agent Marketplace</h1>
-        <p className="text-muted-foreground text-sm">Specialized AI agents with verified identities and delegated permissions</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Agent Marketplace</h1>
+          <p className="text-muted-foreground text-sm">Specialized AI agents with verified identities, delegated permissions, and activity tracking</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => setAiUploadOpen(true)}
+            className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 border-0 text-white"
+          >
+            <Zap className="h-4 w-4 mr-1" /> List Parcel via AI
+          </Button>
+          <Badge variant="outline" className="border-emerald-500 text-emerald-600"><Bot className="h-3 w-3 mr-1" /> {agents.length} Agents</Badge>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {agents.map(agent => (
-          <div key={agent.id} className={`border rounded-xl p-5 bg-card transition-shadow hover:shadow-md cursor-pointer ${selectedAgent === agent.id ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-border'}`} onClick={() => setSelectedAgent(agent.id)}>
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-semibold">{agent.name}</h3>
-                <Badge className={`text-[10px] mt-1 ${agentTypeColors[agent.agentType] || 'bg-gray-100'}`}>{agent.agentType}</Badge>
-              </div>
-              <div className="text-right">
-                <p className="text-lg font-bold text-emerald-600">{agent.trustScore}%</p>
-                <p className="text-[10px] text-muted-foreground">Trust Score</p>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mb-3">{agent.description}</p>
-            <div className="flex flex-wrap gap-1 mb-3">
-              {agent.capabilities.map(cap => (
-                <span key={cap} className="text-[10px] bg-muted px-2 py-0.5 rounded-full">{cap.replace(/_/g, ' ')}</span>
-              ))}
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <div className={`h-2 w-2 rounded-full ${agent.status === 'active' || agent.status === 'busy' ? 'bg-emerald-500' : agent.status === 'idle' ? 'bg-gray-400' : 'bg-red-500'}`} />
-                <span className="text-[10px] text-muted-foreground">{agent.status}</span>
-                {agent.t3AgentRegistered && (
-                  <Badge variant="outline" className="text-[8px] border-emerald-500 text-emerald-600 ml-1"><Lock className="h-2 w-2 mr-0.5" />T3</Badge>
-                )}
-              </div>
-              <Button size="sm" variant="outline" className="text-xs h-7" disabled={delegating} onClick={(e) => { e.stopPropagation(); handleDelegate(agent.id); }}>
-                <Lock className="h-3 w-3 mr-1" /> Delegate
-              </Button>
-            </div>
-          </div>
+      <AiParcelUpload open={aiUploadOpen} onClose={() => setAiUploadOpen(false)} />
+
+      {/* Type Filters */}
+      <div className="flex gap-2 flex-wrap">
+        {agentTypes.map(type => (
+          <Button key={type} size="sm" variant={typeFilter === type ? 'default' : 'outline'} className="text-xs h-7 capitalize" onClick={() => setTypeFilter(type)}>
+            {type === 'all' ? 'All Types' : type}
+          </Button>
         ))}
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Agent Catalog */}
+        <div className="lg:col-span-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredAgents.map(agent => (
+              <div key={agent.id} className={`border rounded-xl p-5 bg-card transition-shadow hover:shadow-md cursor-pointer ${selectedAgent === agent.id ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-border'}`} onClick={() => setSelectedAgent(agent.id)}>
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold">{agent.name}</h3>
+                    <Badge className={`text-[10px] mt-1 ${agentTypeColors[agent.agentType] || 'bg-gray-100'}`}>{agent.agentType}</Badge>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-emerald-600">{agent.trustScore}%</p>
+                    <p className="text-[10px] text-muted-foreground">Trust Score</p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">{agent.description}</p>
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {agent.capabilities.map(cap => (
+                    <span key={cap} className="text-[10px] bg-muted px-2 py-0.5 rounded-full">{cap.replace(/_/g, ' ')}</span>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <div className={`h-2 w-2 rounded-full ${agent.status === 'active' || agent.status === 'busy' ? 'bg-emerald-500' : agent.status === 'idle' ? 'bg-gray-400' : 'bg-red-500'}`} />
+                    <span className="text-[10px] text-muted-foreground">{agent.status}</span>
+                    {agent.t3AgentRegistered && (
+                      <Badge variant="outline" className="text-[8px] border-emerald-500 text-emerald-600 ml-1"><Lock className="h-2 w-2 mr-0.5" />T3</Badge>
+                    )}
+                  </div>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="outline" className="text-xs h-7" disabled={delegating} onClick={(e) => { e.stopPropagation(); handleDelegate(agent.id); }}>
+                      <Lock className="h-3 w-3 mr-1" /> Delegate
+                    </Button>
+                    <Button size="sm" variant="outline" className="text-xs h-7" onClick={(e) => { e.stopPropagation(); setSelectedAgent(agent.id); setAssignDialogOpen(true); }}>
+                      <Plus className="h-3 w-3 mr-1" /> Assign
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Agent Profile & Activity */}
+        <div className="space-y-4">
+          {selectedAgentData ? (
+            <>
+              {/* Profile Card */}
+              <div className="border border-border rounded-xl p-5 bg-card">
+                <h3 className="font-semibold mb-3">Agent Profile</h3>
+                <div className="text-center mb-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-2">
+                    <Bot className="h-8 w-8 text-emerald-600" />
+                  </div>
+                  <h4 className="font-medium">{selectedAgentData.name}</h4>
+                  <Badge className={`text-[10px] mt-1 ${agentTypeColors[selectedAgentData.agentType] || 'bg-gray-100'}`}>{selectedAgentData.agentType}</Badge>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Trust Score</span><span className="font-medium text-emerald-600">{selectedAgentData.trustScore}%</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium">{selectedAgentData.status}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">T3 Registered</span><span className="font-medium">{selectedAgentData.t3AgentRegistered ? 'Yes' : 'No'}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Last Active</span><span className="font-medium text-xs">{selectedAgentData.lastActiveAt ? new Date(selectedAgentData.lastActiveAt).toLocaleString() : 'Never'}</span></div>
+                </div>
+                <div className="mt-3">
+                  <p className="text-xs text-muted-foreground mb-1">T3 Scopes</p>
+                  <div className="flex flex-wrap gap-1">
+                    {(selectedAgentData.t3Scopes || []).map(scope => (
+                      <span key={scope} className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded">{scope}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Capability Discovery */}
+              <div className="border border-border rounded-xl p-5 bg-card">
+                <h3 className="font-semibold mb-3">Capabilities</h3>
+                <div className="space-y-2">
+                  {selectedAgentData.capabilities.map(cap => (
+                    <div key={cap} className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                      <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                      <span className="text-xs">{cap.replace(/_/g, ' ')}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="border border-border rounded-xl p-10 bg-card text-center text-muted-foreground">
+              <Bot className="h-12 w-12 mx-auto mb-3 opacity-20" />
+              <p>Select an agent to view profile</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Assign Agent Dialog */}
+      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Assign Agent to Transaction</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Agent</Label>
+              <p className="text-sm font-medium">{selectedAgentData?.name || 'None selected'}</p>
+            </div>
+            <div>
+              <Label>Transaction</Label>
+              <Select value={selectedTxId} onValueChange={setSelectedTxId}>
+                <SelectTrigger><SelectValue placeholder="Select transaction" /></SelectTrigger>
+                <SelectContent>
+                  {transactions.map(tx => (
+                    <SelectItem key={tx.id} value={tx.id}>Transaction {tx.id.slice(0, 8)}... ({tx.status})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Role</Label>
+              <Select value={assignRole} onValueChange={setAssignRole}>
+                <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reviewer">Reviewer</SelectItem>
+                  <SelectItem value="verifier">Verifier</SelectItem>
+                  <SelectItem value="approver">Approver</SelectItem>
+                  <SelectItem value="negotiator">Negotiator</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button className="w-full" onClick={handleAssign} disabled={!selectedTxId}>Assign Agent</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -462,11 +704,47 @@ function AgentMarketplace() {
 // ─── Trust Ledger ──────────────────────────────────────────────────────────
 
 function TrustLedgerView() {
-  const { trustLedger } = useTrustLandStore();
+  const { trustLedger, fetchTrustLedger } = useTrustLandStore();
   const [filter, setFilter] = React.useState<string>('all');
+  const [search, setSearch] = React.useState('');
+  const [page, setPage] = React.useState(0);
+  const [verifying, setVerifying] = React.useState(false);
+  const [verifyResult, setVerifyResult] = React.useState<string | null>(null);
+  const PAGE_SIZE = 25;
 
-  const filtered = filter === 'all' ? trustLedger : trustLedger.filter(e => e.eventType === filter);
+  // Re-fetch on mount in case the user lands here before the initial load finishes
+  React.useEffect(() => { fetchTrustLedger(); }, [fetchTrustLedger]);
+
+  const filtered = trustLedger.filter(e => {
+    if (filter !== 'all' && e.eventType !== filter) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      const hay = `${e.eventType} ${e.actorDid} ${JSON.stringify(e.eventData)} ${e.eventHash}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
   const eventTypes = ['all', ...new Set(trustLedger.map(e => e.eventType))];
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      const res = await fetch('/api/ledger/verify');
+      const data = await res.json();
+      if (data.verified) {
+        setVerifyResult(`✓ Hash-chain verified — ${data.blocks ?? filtered.length} blocks intact`);
+      } else {
+        setVerifyResult(`✗ Verification failed: ${data.error || 'chain broken'}`);
+      }
+    } catch (e: any) {
+      setVerifyResult(`✗ Error: ${e.message}`);
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -475,18 +753,40 @@ function TrustLedgerView() {
           <h1 className="text-2xl font-bold">Trust Ledger</h1>
           <p className="text-muted-foreground text-sm">Append-only, cryptographically chained record of all trust events</p>
         </div>
-        <Badge variant="outline" className="border-emerald-500 text-emerald-600">
-          <Lock className="h-3 w-3 mr-1" /> Immutable
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={handleVerify} disabled={verifying}>
+            <Lock className="h-3 w-3 mr-1" /> {verifying ? 'Verifying…' : 'Verify Chain'}
+          </Button>
+          <Badge variant="outline" className="border-emerald-500 text-emerald-600">
+            <BookOpen className="h-3 w-3 mr-1" /> {trustLedger.length} Blocks
+          </Badge>
+        </div>
       </div>
 
-      {/* Filter */}
-      <div className="flex gap-2 flex-wrap">
-        {eventTypes.map(type => (
-          <Button key={type} size="sm" variant={filter === type ? 'default' : 'outline'} className="text-xs h-7" onClick={() => setFilter(type)}>
-            {type.replace(/_/g, ' ')}
-          </Button>
-        ))}
+      {verifyResult && (
+        <div className={`rounded-lg px-3 py-2 text-sm border ${verifyResult.startsWith('✓') ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+          {verifyResult}
+        </div>
+      )}
+
+      {/* Search + Filter */}
+      <div className="space-y-3">
+        <div className="relative">
+          <FileSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+            placeholder="Search by event type, actor DID, hash, or event data…"
+            className="pl-10"
+          />
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {eventTypes.map(type => (
+            <Button key={type} size="sm" variant={filter === type ? 'default' : 'outline'} className="text-xs h-7 capitalize" onClick={() => { setFilter(type); setPage(0); }}>
+              {type === 'all' ? 'All Events' : type.replace(/_/g, ' ')}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* Ledger Table */}
@@ -505,13 +805,21 @@ function TrustLedgerView() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((entry, i) => (
+              {pageItems.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                    <BookOpen className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">{search ? 'No entries match your search' : 'No ledger entries yet'}</p>
+                  </td>
+                </tr>
+              )}
+              {pageItems.map((entry, i) => (
                 <tr key={entry.id} className={i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}>
                   <td className="p-3 font-mono">#{entry.blockNumber}</td>
                   <td className="p-3"><Badge variant="outline" className="text-[10px]">{entry.eventType.replace(/_/g, ' ')}</Badge></td>
-                  <td className="p-3 font-mono truncate max-w-[150px]">{entry.actorDid.slice(0, 24)}...</td>
-                  <td className="p-3 truncate max-w-[200px]">{JSON.stringify(entry.eventData).slice(0, 60)}...</td>
-                  <td className="p-3 font-mono text-muted-foreground truncate max-w-[120px]">{entry.eventHash.slice(0, 16)}...</td>
+                  <td className="p-3 font-mono truncate max-w-[150px]">{entry.actorDid?.slice(0, 24) ?? '—'}…</td>
+                  <td className="p-3 truncate max-w-[200px]">{JSON.stringify(entry.eventData).slice(0, 60)}…</td>
+                  <td className="p-3 font-mono text-muted-foreground truncate max-w-[120px]">{entry.eventHash?.slice(0, 16) ?? '—'}…</td>
                   <td className="p-3">
                     {entry.t3Attestation?.agentAuthVerified ? (
                       <Badge variant="outline" className="text-[9px] border-emerald-500 text-emerald-600"><Lock className="h-2.5 w-2.5 mr-0.5" />T3</Badge>
@@ -525,6 +833,18 @@ function TrustLedgerView() {
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-3 border-t border-border bg-muted/30 text-xs">
+            <span className="text-muted-foreground">
+              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous</Button>
+              <span>Page {page + 1} of {totalPages}</span>
+              <Button size="sm" variant="outline" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next</Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -533,26 +853,46 @@ function TrustLedgerView() {
 // ─── Transaction Workflow ──────────────────────────────────────────────────
 
 function TransactionWorkflow() {
-  const { transactions, properties, agents, identities, workflows, advanceWorkflow, isLoading, fetchTransactionDetail } = useTrustLandStore();
+  const { transactions, properties, agents, identities, workflows, advanceWorkflow, isLoading, fetchTransactionDetail, advanceTransactionStage, transactionEvents, fetchTransactionEvents, transactionStages } = useTrustLandStore();
   const [selectedTxId, setSelectedTxId] = React.useState<string | null>(transactions.length > 0 ? transactions[0].id : null);
+  const [showEvents, setShowEvents] = React.useState(false);
 
-  // Auto-select first transaction
   React.useEffect(() => {
     if (!selectedTxId && transactions.length > 0) {
       setSelectedTxId(transactions[0].id);
     }
   }, [transactions, selectedTxId]);
 
-  // Fetch transaction detail when selected
   React.useEffect(() => {
     if (selectedTxId) {
       fetchTransactionDetail(selectedTxId);
+      fetchTransactionEvents(selectedTxId);
     }
-  }, [selectedTxId, fetchTransactionDetail]);
+  }, [selectedTxId, fetchTransactionDetail, fetchTransactionEvents]);
 
   const selectedTx = transactions.find(t => t.id === selectedTxId);
   const workflow = selectedTx ? workflows.find(w => w.transactionId === selectedTx.id) : null;
   const property = selectedTx ? properties.find(p => p.id === selectedTx.propertyId) : null;
+  const txEvents = transactionEvents.filter(e => e.transactionId === selectedTxId);
+
+  const stages = transactionStages.length > 0 ? transactionStages : [
+    { key: 'draft', label: 'Draft', order: 1 },
+    { key: 'offer_submitted', label: 'Offer Submitted', order: 2 },
+    { key: 'seller_review', label: 'Seller Review', order: 3 },
+    { key: 'due_diligence', label: 'Due Diligence', order: 4 },
+    { key: 'legal_review', label: 'Legal Review', order: 5 },
+    { key: 'financing', label: 'Financing', order: 6 },
+    { key: 'approval', label: 'Approval', order: 7 },
+    { key: 'transfer', label: 'Transfer', order: 8 },
+    { key: 'completed', label: 'Completed', order: 9 },
+  ];
+
+  const handleAdvanceStage = async () => {
+    if (!selectedTxId) return;
+    const buyerDid = identities.find(i => i.profile.role === 'buyer')?.did || '';
+    await advanceTransactionStage(selectedTxId, buyerDid, 'Advanced via Transaction Workflow UI');
+    toast.success('Transaction stage advanced');
+  };
 
   const statusColors: Record<string, string> = {
     completed: 'bg-emerald-500',
@@ -564,21 +904,28 @@ function TransactionWorkflow() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Transaction Workflow</h1>
-        <p className="text-muted-foreground text-sm">12-step autonomous property transaction with signed agent actions</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Transaction Workflow</h1>
+          <p className="text-muted-foreground text-sm">9-stage property transaction pipeline with immutable event records</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant={showEvents ? 'default' : 'outline'} className="text-xs" onClick={() => setShowEvents(!showEvents)}>
+            <Clock className="h-3 w-3 mr-1" /> {showEvents ? 'Hide Events' : 'Show Events'}
+          </Button>
+        </div>
       </div>
 
-      {/* Transaction List */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Transaction List */}
         <div className="space-y-3">
           <h3 className="font-semibold text-sm">Transactions</h3>
           {transactions.map(tx => {
             const prop = properties.find(p => p.id === tx.propertyId);
             return (
-              <div key={tx.id} className={`border rounded-lg p-3 cursor-pointer transition-colors ${selectedTxId === tx.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' : 'border-border hover:bg-muted/50'}`} onClick={() => { setSelectedTxId(tx.id); fetchTransactionDetail(tx.id); }}>
+              <div key={tx.id} className={`border rounded-lg p-3 cursor-pointer transition-colors ${selectedTxId === tx.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' : 'border-border hover:bg-muted/50'}`} onClick={() => { setSelectedTxId(tx.id); fetchTransactionDetail(tx.id); fetchTransactionEvents(tx.id); }}>
                 <p className="text-sm font-medium">{prop?.title || 'Property'}</p>
-                <p className="text-xs text-muted-foreground">{tx.status.replace(/_/g, ' ')}</p>
+                <p className="text-xs text-muted-foreground capitalize">{tx.status.replace(/_/g, ' ')}</p>
                 <div className="flex items-center justify-between mt-2">
                   <span className="text-xs font-medium">${(tx.amount / 1000000).toFixed(2)}M</span>
                   <Badge variant={tx.riskLevel === 'low' ? 'secondary' : tx.riskLevel === 'medium' ? 'outline' : 'destructive'} className="text-[10px]">{tx.riskLevel}</Badge>
@@ -588,62 +935,106 @@ function TransactionWorkflow() {
           })}
         </div>
 
-        {/* Workflow Steps */}
-        <div className="lg:col-span-3">
-          {workflow && selectedTx ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold">{property?.title}</h3>
-                  <p className="text-xs text-muted-foreground">Step {selectedTx.currentStep} of {selectedTx.totalSteps}</p>
+        {/* Transaction Detail */}
+        <div className="lg:col-span-3 space-y-6">
+          {selectedTx ? (
+            <>
+              {/* 9-Stage Pipeline */}
+              <div className="border border-border rounded-xl p-5 bg-card">
+                <h3 className="font-semibold mb-4 flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" /> Transaction Pipeline</h3>
+                <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
+                  {stages.map((stage, i) => {
+                    const currentStageIndex = stages.findIndex(s => s.key === selectedTx.status);
+                    const isCompleted = i < currentStageIndex;
+                    const isCurrent = stage.key === selectedTx.status;
+                    return (
+                      <div key={stage.key} className={`text-center p-2 rounded-lg border transition-colors ${isCompleted ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20' : isCurrent ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/20' : 'border-border'}`}>
+                        <div className={`h-6 w-6 rounded-full mx-auto flex items-center justify-center text-white text-xs font-bold mb-1 ${isCompleted ? 'bg-emerald-500' : isCurrent ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                          {isCompleted ? '✓' : stage.order}
+                        </div>
+                        <p className="text-[10px] font-medium leading-tight">{stage.label}</p>
+                      </div>
+                    );
+                  })}
                 </div>
-                <Badge variant="outline" className="border-emerald-500 text-emerald-600">{selectedTx.status.replace(/_/g, ' ')}</Badge>
+                {selectedTx.status !== 'completed' && (
+                  <div className="mt-4 flex justify-end">
+                    <Button size="sm" className="text-xs" disabled={isLoading} onClick={handleAdvanceStage}>
+                      {isLoading ? 'Processing...' : 'Advance to Next Stage'} <ChevronRight className="h-3 w-3 ml-1" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
-              {/* Progress Bar */}
-              <div className="w-full bg-muted rounded-full h-2">
-                <div className="bg-emerald-500 h-2 rounded-full transition-all" style={{ width: `${(selectedTx.currentStep / selectedTx.totalSteps) * 100}%` }} />
-              </div>
-
-              {/* Steps */}
-              <div className="space-y-3">
-                {workflow.steps.map((step, i) => {
-                  const agent = step.agentId ? agents.find(a => a.id === step.agentId) : null;
-                  return (
-                    <div key={step.id} className={`border rounded-lg p-4 ${step.status === 'active' ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20' : ''}`}>
-                      <div className="flex items-start gap-3">
-                        <div className="flex flex-col items-center">
-                          <div className={`h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${statusColors[step.status]}`}>
-                            {step.status === 'completed' ? '✓' : step.stepOrder}
-                          </div>
-                          {i < workflow.steps.length - 1 && <div className={`w-0.5 h-4 ${step.status === 'completed' ? 'bg-emerald-400' : 'bg-gray-200'}`} />}
+              {/* Event Timeline */}
+              {showEvents && (
+                <div className="border border-border rounded-xl p-5 bg-card">
+                  <h3 className="font-semibold mb-4 flex items-center gap-2"><Clock className="h-4 w-4" /> Event Timeline</h3>
+                  <div className="space-y-3 max-h-80 overflow-y-auto">
+                    {txEvents.length > 0 ? txEvents.map(event => (
+                      <div key={event.id} className="flex items-start gap-3 p-2 rounded-lg bg-muted/50">
+                        <div className="h-6 w-6 rounded-full flex items-center justify-center bg-emerald-100 flex-shrink-0">
+                          <Activity className="h-3 w-3 text-emerald-600" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-sm font-medium">{step.stepName}</h4>
-                            <Badge variant="outline" className="text-[10px]">{step.status}</Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-[10px]">{event.eventType.replace(/_/g, ' ')}</Badge>
+                            <span className="text-[10px] text-muted-foreground">{event.actorType}</span>
+                            {event.signatureType === 'Ed25519Signature2020' && (
+                              <Badge variant="outline" className="text-[8px] border-emerald-500 text-emerald-600"><Lock className="h-2 w-2 mr-0.5" />Signed</Badge>
+                            )}
                           </div>
-                          <p className="text-xs text-muted-foreground mt-1">{step.description}</p>
-                          {agent && <p className="text-[10px] text-muted-foreground mt-1">Agent: {agent.name} ({agent.agentType})</p>}
-                          {step.completedAt && <p className="text-[10px] text-muted-foreground mt-1">Completed: {new Date(step.completedAt).toLocaleString()}</p>}
-                          {step.signature && <p className="text-[10px] font-mono text-emerald-600 mt-1 truncate">Signed: {step.signature.slice(0, 40)}...</p>}
-                          {step.outputData && (
-                            <div className="mt-2 p-2 bg-muted rounded text-[10px] font-mono overflow-x-auto">
-                              {JSON.stringify(step.outputData, null, 2).slice(0, 200)}
-                            </div>
+                          <p className="text-xs text-muted-foreground mt-1 truncate">{event.actorId.slice(0, 24)}...</p>
+                          {event.metadata && (
+                            <p className="text-[10px] text-muted-foreground mt-1">{typeof event.metadata === 'object' ? (event.metadata as Record<string, unknown>).notes || JSON.stringify(event.metadata).slice(0, 80) : String(event.metadata).slice(0, 80)}</p>
                           )}
-                          {step.status === 'active' && (
-                            <Button size="sm" className="mt-3 h-7 text-xs" disabled={isLoading} onClick={() => advanceWorkflow(workflow.id, i)}>
-                              {isLoading ? 'Processing...' : 'Complete Step'} <ChevronRight className="h-3 w-3 ml-1" />
-                            </Button>
-                          )}
+                          <p className="text-[10px] text-muted-foreground mt-1">{new Date(event.timestamp).toLocaleString()}</p>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+                    )) : (
+                      <p className="text-sm text-muted-foreground">No events recorded yet</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Workflow Steps (existing 12-step view) */}
+              {workflow && (
+                <div className="border border-border rounded-xl p-5 bg-card">
+                  <h3 className="font-semibold mb-4">12-Step Workflow Detail</h3>
+                  <div className="w-full bg-muted rounded-full h-2 mb-4">
+                    <div className="bg-emerald-500 h-2 rounded-full transition-all" style={{ width: `${(selectedTx.currentStep / selectedTx.totalSteps) * 100}%` }} />
+                  </div>
+                  <div className="space-y-3">
+                    {workflow.steps.map((step, i) => {
+                      const agent = step.agentId ? agents.find(a => a.id === step.agentId) : null;
+                      return (
+                        <div key={step.id} className={`border rounded-lg p-3 ${step.status === 'active' ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20' : ''}`}>
+                          <div className="flex items-start gap-3">
+                            <div className={`h-7 w-7 rounded-full flex items-center justify-center text-white text-xs font-bold ${statusColors[step.status]}`}>
+                              {step.status === 'completed' ? '✓' : step.stepOrder}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-medium">{step.stepName}</h4>
+                                <Badge variant="outline" className="text-[10px]">{step.status}</Badge>
+                              </div>
+                              {agent && <p className="text-[10px] text-muted-foreground mt-0.5">Agent: {agent.name}</p>}
+                              {step.signature && <p className="text-[10px] font-mono text-emerald-600 mt-0.5 truncate">Signed: {step.signature.slice(0, 32)}...</p>}
+                              {step.status === 'active' && (
+                                <Button size="sm" className="mt-2 h-7 text-xs" disabled={isLoading} onClick={() => advanceWorkflow(workflow.id, i)}>
+                                  Complete Step <ChevronRight className="h-3 w-3 ml-1" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="flex items-center justify-center h-64 text-muted-foreground">
               <div className="text-center">
@@ -661,22 +1052,97 @@ function TransactionWorkflow() {
 // ─── Due Diligence ─────────────────────────────────────────────────────────
 
 function DueDiligenceView() {
-  const { documents, riskReports, uploadDocument } = useTrustLandStore();
+  const { documents, riskReports, uploadDocument, properties, identities, fetchDocuments, fetchRiskReports } = useTrustLandStore();
   const [uploading, setUploading] = React.useState(false);
+  const [selectedPropertyId, setSelectedPropertyId] = React.useState<string>('');
+  const [selectedDocType, setSelectedDocType] = React.useState<string>('title_deed');
+  const [generatingReport, setGeneratingReport] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleUpload = async (docType: string) => {
+  // Pick the first property by default once properties are loaded
+  React.useEffect(() => {
+    if (properties.length > 0 && !selectedPropertyId) {
+      setSelectedPropertyId(properties[0].id);
+    }
+  }, [properties, selectedPropertyId]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!selectedPropertyId) {
+      toast.error('Please select a property first');
+      return;
+    }
     setUploading(true);
-    const identities = useTrustLandStore.getState().identities;
-    const buyerDid = identities.find(i => i.profile.role === 'buyer')?.did || '';
-    await uploadDocument({
-      propertyId: Array.from(useTrustLandStore.getState().properties)[0]?.id || '',
-      uploaderDid: buyerDid,
-      documentType: docType,
-      fileName: `${docType}_${Date.now()}.pdf`,
-      fileContent: `simulated_${docType}_content_${Date.now()}`
-    });
-    setUploading(false);
-    toast.success(`Document uploaded and processed: ${docType.replace(/_/g, ' ')}`);
+    try {
+      // Read file as data URL (base64) — works for any file type
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const fileContent = reader.result as string; // data URL
+        const buyerDid = identities.find(i => i.profile.role === 'buyer')?.did
+                       || identities[0]?.did
+                       || 'did:t3:trustland-anonymous';
+        try {
+          await uploadDocument({
+            propertyId: selectedPropertyId,
+            uploaderDid: buyerDid,
+            documentType: selectedDocType,
+            fileName: file.name,
+            fileContent,
+            fileSize: file.size,
+            mimeType: file.type,
+          });
+          await fetchDocuments();
+          toast.success(`"${file.name}" uploaded & analyzed as ${selectedDocType.replace(/_/g, ' ')}`);
+        } catch (err: any) {
+          toast.error(err.message || 'Upload failed');
+        } finally {
+          setUploading(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+      };
+      reader.onerror = () => {
+        toast.error('Failed to read file');
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error(err.message || 'Upload failed');
+      setUploading(false);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    if (!selectedPropertyId) {
+      toast.error('Select a property first');
+      return;
+    }
+    setGeneratingReport(true);
+    try {
+      // Find a verification-type agent to generate the report
+      const verifyAgent = useTrustLandStore.getState().agents.find(a => a.agentType === 'verification')
+                       || useTrustLandStore.getState().agents[0];
+      const res = await fetch('/api/due-diligence/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          propertyId: selectedPropertyId,
+          generatedBy: verifyAgent?.identityDid || 'did:t3:trustland-network',
+          reportType: 'full',
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Generation failed (${res.status})`);
+      }
+      await fetchRiskReports();
+      await fetchDocuments();
+      toast.success('Risk assessment report generated');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to generate report');
+    } finally {
+      setGeneratingReport(false);
+    }
   };
 
   const statusIcons: Record<string, string> = {
@@ -686,6 +1152,8 @@ function DueDiligenceView() {
     rejected: '✕ Rejected'
   };
 
+  const docTypes = ['title_deed', 'survey_map', 'sale_agreement', 'valuation_report', 'identity_proof', 'bank_statement', 'tax_record'];
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -693,25 +1161,102 @@ function DueDiligenceView() {
           <h1 className="text-2xl font-bold">Autonomous Due Diligence</h1>
           <p className="text-muted-foreground text-sm">AI-powered document analysis, verification, and risk assessment</p>
         </div>
+        <Badge variant="outline" className="border-emerald-500 text-emerald-600">
+          <FileSearch className="h-3 w-3 mr-1" /> {documents.length} docs · {riskReports.length} reports
+        </Badge>
       </div>
 
       {/* Upload Section */}
       <div className="border border-border rounded-xl p-5 bg-card">
         <h3 className="font-semibold mb-3 flex items-center gap-2"><FileSearch className="h-4 w-4" /> Upload Documents for Analysis</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
-          {['title_deed', 'survey_map', 'sale_agreement', 'valuation_report', 'identity_proof', 'bank_statement', 'tax_record'].map(type => (
-            <Button key={type} size="sm" variant="outline" className="text-xs h-9" disabled={uploading} onClick={() => handleUpload(type)}>
-              {type.replace(/_/g, ' ')}
-            </Button>
-          ))}
+
+        {/* Property picker */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <Label className="text-xs mb-1 block">Property *</Label>
+            <Select value={selectedPropertyId} onValueChange={setSelectedPropertyId}>
+              <SelectTrigger><SelectValue placeholder="Select a property…" /></SelectTrigger>
+              <SelectContent>
+                {properties.map(p => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.title} — {p.city}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs mb-1 block">Document Type</Label>
+            <Select value={selectedDocType} onValueChange={setSelectedDocType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {docTypes.map(t => (
+                  <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* File picker + quick upload buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={handleFileUpload}
+            className="hidden"
+            accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.txt"
+          />
+          <Button
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || !selectedPropertyId}
+            className="bg-emerald-600 hover:bg-emerald-700"
+          >
+            {uploading ? (
+              <><Activity className="h-4 w-4 mr-1 animate-pulse" /> Uploading…</>
+            ) : (
+              <><FileSearch className="h-4 w-4 mr-1" /> Choose File to Upload</>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleGenerateReport}
+            disabled={generatingReport || !selectedPropertyId}
+          >
+            {generatingReport ? (
+              <><Activity className="h-4 w-4 mr-1 animate-pulse" /> Generating…</>
+            ) : (
+              <><Star className="h-4 w-4 mr-1" /> Generate Risk Report</>
+            )}
+          </Button>
+          <span className="text-[10px] text-muted-foreground">
+            Accepts PDF, JPG, PNG, DOC, TXT — analyzed with OCR + anomaly detection
+          </span>
         </div>
       </div>
+
+      {/* Selected property info banner */}
+      {selectedPropertyId && (
+        <div className="rounded-lg bg-muted/40 border border-border px-3 py-2 text-xs text-muted-foreground">
+          {(() => {
+            const p = properties.find(p => p.id === selectedPropertyId);
+            return p ? (
+              <>Analyzing documents for <strong>{p.title}</strong> at {p.address}, {p.city} · Trust Score {p.trustScore}%</>
+            ) : null;
+          })()}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Documents */}
         <div className="border border-border rounded-xl p-5 bg-card">
           <h3 className="font-semibold mb-4">Processed Documents</h3>
           <div className="space-y-3 max-h-96 overflow-y-auto">
+            {documents.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">No documents uploaded yet. Upload a file above to start analysis.</p>
+            )}
             {documents.map(doc => (
               <div key={doc.id} className="p-3 rounded-lg bg-muted/50">
                 <div className="flex items-center justify-between mb-2">
@@ -736,7 +1281,7 @@ function DueDiligenceView() {
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-muted-foreground mt-2 font-mono">Hash: {doc.fileHash.slice(0, 32)}...</p>
+                <p className="text-[10px] text-muted-foreground mt-2 font-mono">Hash: {doc.fileHash?.slice(0, 32) ?? '—'}…</p>
               </div>
             ))}
           </div>
@@ -746,6 +1291,9 @@ function DueDiligenceView() {
         <div className="border border-border rounded-xl p-5 bg-card">
           <h3 className="font-semibold mb-4">Risk Assessment Reports</h3>
           <div className="space-y-4 max-h-96 overflow-y-auto">
+            {riskReports.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">No risk reports yet. Click "Generate Risk Report" above.</p>
+            )}
             {riskReports.map(report => (
               <div key={report.id} className="p-4 rounded-lg bg-muted/50">
                 <div className="flex items-center justify-between mb-3">
@@ -893,8 +1441,16 @@ function TrustScoreView() {
 // ─── Messages View ─────────────────────────────────────────────────────────
 
 function MessagesView() {
-  const { messages, identities, sendMessage } = useTrustLandStore();
+  const { messages, identities, sendMessage, fetchMessages } = useTrustLandStore();
   const [sending, setSending] = React.useState(false);
+  const [composeOpen, setComposeOpen] = React.useState(false);
+  const [recipient, setRecipient] = React.useState('');
+  const [messageType, setMessageType] = React.useState('inquiry');
+  const [subject, setSubject] = React.useState('');
+  const [content, setContent] = React.useState('');
+  const [priority, setPriority] = React.useState('normal');
+
+  const senderIdentity = identities[0]; // Use first identity as sender for now
 
   const getIdentityName = (did: string) => {
     const id = identities.find(i => i.did === did);
@@ -911,14 +1467,135 @@ function MessagesView() {
     notification: 'bg-gray-100 text-gray-700',
   };
 
+  const handleSend = async () => {
+    if (!senderIdentity || !recipient || !subject || !content) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    setSending(true);
+    try {
+      await sendMessage({
+        senderDid: senderIdentity.did,
+        receiverDid: recipient,
+        messageType,
+        subject,
+        content: { text: content },
+        priority,
+      });
+      await fetchMessages();
+      toast.success('Message sent and signed with Ed25519');
+      setComposeOpen(false);
+      setRecipient(''); setSubject(''); setContent(''); setMessageType('inquiry'); setPriority('normal');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to send message');
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Agent Messages</h1>
-        <p className="text-muted-foreground text-sm">Authenticated agent-to-agent communication with cryptographic signatures</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Agent Messages</h1>
+          <p className="text-muted-foreground text-sm">Authenticated agent-to-agent communication with cryptographic signatures</p>
+        </div>
+        <Button
+          size="sm"
+          onClick={() => setComposeOpen(true)}
+          disabled={!senderIdentity}
+          className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 border-0 text-white"
+        >
+          <MessageSquare className="h-4 w-4 mr-1" /> New Message
+        </Button>
       </div>
 
+      {!senderIdentity && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+          No identity available to send messages from. Verify your identity first in the Auth page.
+        </div>
+      )}
+
+      {/* Compose dialog */}
+      <Dialog open={composeOpen} onOpenChange={setComposeOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send Signed Message</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs mb-1 block">From (Sender)</Label>
+              <Input value={senderIdentity ? `${senderIdentity.profile.name} (${senderIdentity.did.slice(0, 24)}…)` : '—'} disabled />
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">To (Recipient) *</Label>
+              <Select value={recipient} onValueChange={setRecipient}>
+                <SelectTrigger><SelectValue placeholder="Select recipient identity" /></SelectTrigger>
+                <SelectContent>
+                  {identities.filter(i => i.did !== senderIdentity?.did).map(i => (
+                    <SelectItem key={i.did} value={i.did}>
+                      {i.profile.name} — {i.credentialType}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs mb-1 block">Message Type</Label>
+                <Select value={messageType} onValueChange={setMessageType}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inquiry">Inquiry</SelectItem>
+                    <SelectItem value="offer">Offer</SelectItem>
+                    <SelectItem value="counter_offer">Counter Offer</SelectItem>
+                    <SelectItem value="verification_request">Verification Request</SelectItem>
+                    <SelectItem value="approval">Approval</SelectItem>
+                    <SelectItem value="rejection">Rejection</SelectItem>
+                    <SelectItem value="notification">Notification</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Priority</Label>
+                <Select value={priority} onValueChange={setPriority}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Subject *</Label>
+              <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Offer on 3BR Apartment in Westlands" />
+            </div>
+            <div>
+              <Label className="text-xs mb-1 block">Message *</Label>
+              <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Write your message…" />
+            </div>
+            <div className="flex items-center justify-between pt-2">
+              <p className="text-[10px] text-muted-foreground">
+                <Lock className="h-3 w-3 inline mr-1" />Will be signed with your Ed25519 key
+              </p>
+              <Button onClick={handleSend} disabled={sending} className="bg-emerald-600 hover:bg-emerald-700">
+                {sending ? 'Sending…' : 'Send Signed Message'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="space-y-3 max-h-[700px] overflow-y-auto">
+        {messages.length === 0 && (
+          <div className="text-center py-12 text-muted-foreground">
+            <MessageSquare className="h-10 w-10 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No messages yet. Click "New Message" to start a signed conversation.</p>
+          </div>
+        )}
         {messages.map(msg => (
           <div key={msg.id} className="border border-border rounded-lg p-4 bg-card">
             <div className="flex items-center justify-between mb-2">
@@ -935,7 +1612,7 @@ function MessagesView() {
               <span className="text-xs font-medium text-teal-600">{getIdentityName(msg.receiverDid)}</span>
             </div>
             <div className="p-2 bg-muted rounded text-xs">
-              {JSON.stringify(msg.content, null, 2).slice(0, 300)}
+              {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2).slice(0, 300)}
             </div>
             <p className="text-[10px] font-mono text-emerald-600 mt-2 truncate">Signed: {msg.signature.slice(0, 40)}...</p>
           </div>
@@ -1002,6 +1679,740 @@ function IdentitiesView() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ─── Property Verification Dashboard ─────────────────────────────────────────
+
+interface PropertyVerification {
+  id: string;
+  propertyId: string;
+  verifierId: string;
+  verificationStatus: 'pending' | 'in_progress' | 'completed' | 'failed' | 'flagged';
+  verificationType: 'ownership' | 'title_deed' | 'land_survey' | 'compliance' | 'full';
+  verificationNotes: string;
+  createdAt: string;
+  updatedAt: string;
+  t3AccessTokenJti: string;
+  t3AgentAuthVerified: boolean;
+  teeAttestationId: string | null;
+  signature: string;
+  signatureType: string;
+  findings: Array<{
+    category: string;
+    severity: 'info' | 'low' | 'medium' | 'high' | 'critical';
+    description: string;
+    evidence: string;
+    verified: boolean;
+  }>;
+  documentsReviewed: string[];
+  riskScore: number;
+}
+
+interface DueDiligenceReport {
+  id: string;
+  propertyId: string;
+  generatedBy: string;
+  riskScore: number;
+  summary: string;
+  findings: Array<{
+    id: string;
+    category: string;
+    severity: 'info' | 'low' | 'medium' | 'high' | 'critical';
+    title: string;
+    description: string;
+    recommendation: string;
+    evidence: string[];
+    verifiedBy: string;
+    t3Attested: boolean;
+  }>;
+  recommendations: string[];
+  createdAt: string;
+  verificationIds: string[];
+  t3AccessTokenJti: string;
+  teeAttestationId: string | null;
+  signature: string;
+  signatureType: string;
+  dataSources: string[];
+  overallRiskLevel: 'low' | 'medium' | 'high' | 'critical';
+  confidenceScore: number;
+}
+
+function getRiskColor(score: number): string {
+  if (score <= 20) return 'text-emerald-600';
+  if (score <= 40) return 'text-amber-600';
+  if (score <= 70) return 'text-orange-600';
+  return 'text-red-600';
+}
+
+function getRiskBg(score: number): string {
+  if (score <= 20) return 'bg-emerald-500';
+  if (score <= 40) return 'bg-amber-500';
+  if (score <= 70) return 'bg-orange-500';
+  return 'bg-red-500';
+}
+
+function getRiskLabel(score: number): string {
+  if (score <= 20) return 'Low';
+  if (score <= 40) return 'Medium';
+  if (score <= 70) return 'High';
+  return 'Critical';
+}
+
+function VerificationDashboardView() {
+  const { properties, agents } = useTrustLandStore();
+  const [verifications, setVerifications] = React.useState<PropertyVerification[]>([]);
+  const [ddReports, setDdReports] = React.useState<DueDiligenceReport[]>([]);
+  const [selectedVerification, setSelectedVerification] = React.useState<PropertyVerification | null>(null);
+  const [selectedReport, setSelectedReport] = React.useState<DueDiligenceReport | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = React.useState(false);
+  const [showGenerateDialog, setShowGenerateDialog] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<'verifications' | 'reports' | 'timeline'>('verifications');
+
+  // Form state
+  const [formPropertyId, setFormPropertyId] = React.useState('');
+  const [formVerificationType, setFormVerificationType] = React.useState<PropertyVerification['verificationType']>('full');
+  const [formNotes, setFormNotes] = React.useState('');
+  const [formReportPropertyId, setFormReportPropertyId] = React.useState('');
+
+  const verificationAgent = agents.find(a => a.agentType === 'verification');
+
+  // Fetch verifications and reports
+  const fetchVerifications = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/verifications');
+      if (res.ok) {
+        const data = await res.json();
+        setVerifications(data);
+      }
+    } catch (e) { console.error('Failed to fetch verifications:', e); }
+  }, []);
+
+  const fetchDdReports = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/due-diligence');
+      if (res.ok) {
+        const data = await res.json();
+        setDdReports(data);
+      }
+    } catch (e) { console.error('Failed to fetch due diligence reports:', e); }
+  }, []);
+
+  React.useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      await Promise.all([fetchVerifications(), fetchDdReports()]);
+      setLoading(false);
+    };
+    load();
+    const interval = setInterval(() => { fetchVerifications(); fetchDdReports(); }, 30000);
+    return () => clearInterval(interval);
+  }, [fetchVerifications, fetchDdReports]);
+
+  const handleCreateVerification = async () => {
+    if (!formPropertyId) { toast.error('Please select a property'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/verifications/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          propertyId: formPropertyId,
+          verifierId: verificationAgent?.id || '',
+          verificationType: formVerificationType,
+          verificationNotes: formNotes,
+        }),
+      });
+      if (res.ok) {
+        toast.success('Verification created successfully');
+        setShowCreateDialog(false);
+        setFormPropertyId('');
+        setFormVerificationType('full');
+        setFormNotes('');
+        await fetchVerifications();
+      } else {
+        toast.error('Failed to create verification');
+      }
+    } catch (e) {
+      toast.error('Error creating verification');
+    }
+    setSubmitting(false);
+  };
+
+  const handleGenerateReport = async () => {
+    if (!formReportPropertyId) { toast.error('Please select a property'); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/due-diligence/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          propertyId: formReportPropertyId,
+          generatedBy: verificationAgent?.identityDid || 'system',
+        }),
+      });
+      if (res.ok) {
+        toast.success('Due diligence report generated');
+        setShowGenerateDialog(false);
+        setFormReportPropertyId('');
+        await fetchDdReports();
+        await fetchVerifications();
+      } else {
+        toast.error('Failed to generate report');
+      }
+    } catch (e) {
+      toast.error('Error generating report');
+    }
+    setSubmitting(false);
+  };
+
+  const getPropertyName = (propertyId: string) => {
+    const prop = properties.find(p => p.id === propertyId);
+    return prop?.title || propertyId.slice(0, 12) + '...';
+  };
+
+  const statusColors: Record<string, string> = {
+    completed: 'bg-emerald-100 text-emerald-700',
+    in_progress: 'bg-amber-100 text-amber-700',
+    pending: 'bg-gray-100 text-gray-700',
+    failed: 'bg-red-100 text-red-700',
+    flagged: 'bg-orange-100 text-orange-700',
+  };
+
+  const severityColors: Record<string, string> = {
+    info: 'bg-sky-100 text-sky-700',
+    low: 'bg-emerald-100 text-emerald-700',
+    medium: 'bg-amber-100 text-amber-700',
+    high: 'bg-orange-100 text-orange-700',
+    critical: 'bg-red-100 text-red-700',
+  };
+
+  const typeLabels: Record<string, string> = {
+    ownership: 'Ownership',
+    title_deed: 'Title Deed',
+    land_survey: 'Land Survey',
+    compliance: 'Compliance',
+    full: 'Full Verification',
+  };
+
+  // Timeline: merge verifications and reports sorted by date
+  const timelineEvents = [
+    ...verifications.map(v => ({
+      id: v.id,
+      type: 'verification' as const,
+      status: v.verificationStatus,
+      title: `${typeLabels[v.verificationType] || v.verificationType} Verification`,
+      propertyId: v.propertyId,
+      propertyName: getPropertyName(v.propertyId),
+      riskScore: v.riskScore,
+      timestamp: v.createdAt,
+      t3Verified: v.t3AgentAuthVerified,
+    })),
+    ...ddReports.map(r => ({
+      id: r.id,
+      type: 'report' as const,
+      status: r.overallRiskLevel === 'low' ? 'completed' : r.overallRiskLevel === 'medium' ? 'in_progress' : 'flagged',
+      title: 'Due Diligence Report',
+      propertyId: r.propertyId,
+      propertyName: getPropertyName(r.propertyId),
+      riskScore: r.riskScore,
+      timestamp: r.createdAt,
+      t3Verified: !!r.t3AccessTokenJti,
+    })),
+  ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  // Summary stats
+  const totalVerifications = verifications.length;
+  const completedVerifications = verifications.filter(v => v.verificationStatus === 'completed').length;
+  const flaggedVerifications = verifications.filter(v => v.verificationStatus === 'flagged').length;
+  const avgRiskScore = verifications.length > 0 ? Math.round(verifications.reduce((s, v) => s + v.riskScore, 0) / verifications.length) : 0;
+  const totalReports = ddReports.length;
+
+  if (loading) return <div className="p-8">Loading verification dashboard...</div>;
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Property Verification & Due Diligence</h1>
+          <p className="text-muted-foreground text-sm">Verify property ownership, generate due diligence reports, and track risk assessments</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700">
+                <Plus className="h-4 w-4 mr-1" /> New Verification
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create Property Verification</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Property</Label>
+                  <Select value={formPropertyId} onValueChange={setFormPropertyId}>
+                    <SelectTrigger><SelectValue placeholder="Select a property" /></SelectTrigger>
+                    <SelectContent>
+                      {properties.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.title} — {p.city}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Verification Type</Label>
+                  <Select value={formVerificationType} onValueChange={(v) => setFormVerificationType(v as PropertyVerification['verificationType'])}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="full">Full Verification</SelectItem>
+                      <SelectItem value="ownership">Ownership</SelectItem>
+                      <SelectItem value="title_deed">Title Deed</SelectItem>
+                      <SelectItem value="land_survey">Land Survey</SelectItem>
+                      <SelectItem value="compliance">Compliance</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea value={formNotes} onChange={e => setFormNotes(e.target.value)} placeholder="Additional notes for this verification..." />
+                </div>
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg border border-emerald-200 text-xs text-emerald-800 dark:text-emerald-200">
+                  <Lock className="h-3 w-3 inline mr-1" /> Verification will be authenticated via T3 Agent Auth and signed with Ed25519.
+                </div>
+                <Button className="w-full" onClick={handleCreateVerification} disabled={submitting}>
+                  {submitting ? 'Creating...' : 'Create Verification'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={showGenerateDialog} onOpenChange={setShowGenerateDialog}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline">
+                <FileText className="h-4 w-4 mr-1" /> Generate Report
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Generate Due Diligence Report</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Property</Label>
+                  <Select value={formReportPropertyId} onValueChange={setFormReportPropertyId}>
+                    <SelectTrigger><SelectValue placeholder="Select a property" /></SelectTrigger>
+                    <SelectContent>
+                      {properties.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.title} — {p.city}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg border border-emerald-200 text-xs text-emerald-800 dark:text-emerald-200">
+                  <Lock className="h-3 w-3 inline mr-1" /> Report will include all existing verifications and be signed with Ed25519.
+                </div>
+                <Button className="w-full" onClick={handleGenerateReport} disabled={submitting}>
+                  {submitting ? 'Generating...' : 'Generate Due Diligence Report'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        {[
+          { label: 'Total Verifications', value: totalVerifications, color: 'text-emerald-600', icon: <ClipboardCheck className="h-4 w-4" /> },
+          { label: 'Completed', value: completedVerifications, color: 'text-teal-600', icon: <CheckCircle2 className="h-4 w-4" /> },
+          { label: 'Flagged', value: flaggedVerifications, color: 'text-red-600', icon: <AlertTriangle className="h-4 w-4" /> },
+          { label: 'Avg Risk Score', value: avgRiskScore, color: getRiskColor(avgRiskScore), icon: <Activity className="h-4 w-4" /> },
+          { label: 'DD Reports', value: totalReports, color: 'text-violet-600', icon: <FileText className="h-4 w-4" /> },
+        ].map((kpi, i) => (
+          <div key={i} className="border border-border rounded-xl p-4 bg-card">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="text-muted-foreground">{kpi.icon}</div>
+              <p className="text-xs text-muted-foreground">{kpi.label}</p>
+            </div>
+            <p className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Tab Switcher */}
+      <div className="flex gap-2 border-b border-border pb-2">
+        {[
+          { key: 'verifications' as const, label: 'Verifications', icon: <ClipboardCheck className="h-4 w-4" /> },
+          { key: 'reports' as const, label: 'Due Diligence Reports', icon: <FileText className="h-4 w-4" /> },
+          { key: 'timeline' as const, label: 'Timeline', icon: <Clock className="h-4 w-4" /> },
+        ].map(tab => (
+          <Button key={tab.key} size="sm" variant={activeTab === tab.key ? 'default' : 'ghost'} className="text-xs gap-1" onClick={() => setActiveTab(tab.key)}>
+            {tab.icon} {tab.label}
+          </Button>
+        ))}
+      </div>
+
+      {/* Verifications Tab */}
+      {activeTab === 'verifications' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-3">
+            {verifications.length === 0 ? (
+              <div className="border border-border rounded-xl p-12 text-center text-muted-foreground">
+                <ClipboardCheck className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                <p>No verifications yet. Create one to get started.</p>
+              </div>
+            ) : (
+              verifications.map(v => (
+                <div
+                  key={v.id}
+                  className={`border rounded-xl p-4 bg-card cursor-pointer transition-all hover:shadow-md ${selectedVerification?.id === v.id ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-border'}`}
+                  onClick={() => setSelectedVerification(v)}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h3 className="text-sm font-semibold">{getPropertyName(v.propertyId)}</h3>
+                      <p className="text-xs text-muted-foreground">{typeLabels[v.verificationType]}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge className={`text-[10px] ${statusColors[v.verificationStatus] || ''}`}>
+                        {v.verificationStatus.replace(/_/g, ' ')}
+                      </Badge>
+                      {v.t3AgentAuthVerified && (
+                        <Badge variant="outline" className="text-[9px] border-emerald-500 text-emerald-600">
+                          <Lock className="h-2.5 w-2.5 mr-0.5" />T3
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 mt-3">
+                    {/* Risk Score Indicator */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Risk:</span>
+                      <div className="w-20 bg-muted rounded-full h-2">
+                        <div className={`h-2 rounded-full ${getRiskBg(v.riskScore)}`} style={{ width: `${v.riskScore}%` }} />
+                      </div>
+                      <span className={`text-xs font-bold ${getRiskColor(v.riskScore)}`}>{v.riskScore}</span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">
+                      {v.findings.length} finding{v.findings.length !== 1 ? 's' : ''}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(v.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Verification Detail Panel */}
+          <div className="border border-border rounded-xl p-5 bg-card">
+            {selectedVerification ? (
+              <div className="space-y-4">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Eye className="h-4 w-4" /> Verification Detail
+                </h3>
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Property</p>
+                    <p className="text-sm font-medium">{getPropertyName(selectedVerification.propertyId)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Type</p>
+                    <p className="text-sm">{typeLabels[selectedVerification.verificationType]}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Status</p>
+                    <Badge className={`text-[10px] ${statusColors[selectedVerification.verificationStatus]}`}>
+                      {selectedVerification.verificationStatus.replace(/_/g, ' ')}
+                    </Badge>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Risk Score</p>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-lg font-bold ${getRiskColor(selectedVerification.riskScore)}`}>{selectedVerification.riskScore}</span>
+                      <span className="text-xs text-muted-foreground">({getRiskLabel(selectedVerification.riskScore)})</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2 mt-1">
+                      <div className={`h-2 rounded-full ${getRiskBg(selectedVerification.riskScore)}`} style={{ width: `${selectedVerification.riskScore}%` }} />
+                    </div>
+                  </div>
+                  {selectedVerification.verificationNotes && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Notes</p>
+                      <p className="text-xs">{selectedVerification.verificationNotes}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">T3 Auth</p>
+                    <p className="text-[10px] font-mono">{selectedVerification.t3AgentAuthVerified ? '✓ Verified' : '✕ Not verified'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Signature</p>
+                    <p className="text-[10px] font-mono text-emerald-600 truncate">{selectedVerification.signature.slice(0, 40)}...</p>
+                  </div>
+                </div>
+
+                {/* Findings */}
+                {selectedVerification.findings.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold mb-2">Findings</h4>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {selectedVerification.findings.map((f, i) => (
+                        <div key={i} className="p-2 rounded-lg bg-muted/50 text-xs">
+                          <div className="flex items-center gap-1 mb-1">
+                            <Badge className={`text-[9px] h-4 ${severityColors[f.severity] || ''}`}>{f.severity}</Badge>
+                            <span className="font-medium">{f.category}</span>
+                          </div>
+                          <p className="text-muted-foreground">{f.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-[10px] text-muted-foreground">
+                  Created: {new Date(selectedVerification.createdAt).toLocaleString()}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+                <div className="text-center">
+                  <Eye className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                  <p>Select a verification to view details</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Due Diligence Reports Tab */}
+      {activeTab === 'reports' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-3">
+            {ddReports.length === 0 ? (
+              <div className="border border-border rounded-xl p-12 text-center text-muted-foreground">
+                <FileText className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                <p>No due diligence reports yet. Generate one to get started.</p>
+              </div>
+            ) : (
+              ddReports.map(r => (
+                <div
+                  key={r.id}
+                  className={`border rounded-xl p-4 bg-card cursor-pointer transition-all hover:shadow-md ${selectedReport?.id === r.id ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-border'}`}
+                  onClick={() => setSelectedReport(r)}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h3 className="text-sm font-semibold">{getPropertyName(r.propertyId)}</h3>
+                      <p className="text-xs text-muted-foreground">Due Diligence Report</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={r.overallRiskLevel === 'low' ? 'secondary' : r.overallRiskLevel === 'medium' ? 'outline' : 'destructive'} className="text-[10px]">
+                        {r.overallRiskLevel.toUpperCase()}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 mt-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Risk:</span>
+                      <div className="w-20 bg-muted rounded-full h-2">
+                        <div className={`h-2 rounded-full ${getRiskBg(r.riskScore)}`} style={{ width: `${r.riskScore}%` }} />
+                      </div>
+                      <span className={`text-xs font-bold ${getRiskColor(r.riskScore)}`}>{r.riskScore}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      Confidence: {Math.round(r.confidenceScore * 100)}%
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {r.findings.length} finding{r.findings.length !== 1 ? 's' : ''}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(r.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  {r.summary && (
+                    <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{r.summary}</p>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Report Detail Panel */}
+          <div className="border border-border rounded-xl p-5 bg-card">
+            {selectedReport ? (
+              <div className="space-y-4">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <FileText className="h-4 w-4" /> Report Detail
+                </h3>
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Property</p>
+                    <p className="text-sm font-medium">{getPropertyName(selectedReport.propertyId)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Overall Risk Level</p>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={selectedReport.overallRiskLevel === 'low' ? 'secondary' : selectedReport.overallRiskLevel === 'medium' ? 'outline' : 'destructive'} className="text-xs">
+                        {selectedReport.overallRiskLevel.toUpperCase()}
+                      </Badge>
+                      <span className={`text-lg font-bold ${getRiskColor(selectedReport.riskScore)}`}>{selectedReport.riskScore}/100</span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Confidence Score</p>
+                    <div className="w-full bg-muted rounded-full h-2 mt-1">
+                      <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${selectedReport.confidenceScore * 100}%` }} />
+                    </div>
+                    <span className="text-xs text-muted-foreground">{Math.round(selectedReport.confidenceScore * 100)}%</span>
+                  </div>
+                  {selectedReport.summary && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Summary</p>
+                      <p className="text-xs">{selectedReport.summary}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Data Sources</p>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {selectedReport.dataSources.map((src, i) => (
+                        <span key={i} className="text-[9px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300 px-2 py-0.5 rounded-full">{src}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Signature</p>
+                    <p className="text-[10px] font-mono text-emerald-600 truncate">{selectedReport.signature.slice(0, 40)}...</p>
+                  </div>
+                </div>
+
+                {/* Findings */}
+                {selectedReport.findings.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold mb-2">Findings ({selectedReport.findings.length})</h4>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {selectedReport.findings.map((f, i) => (
+                        <div key={f.id || i} className="p-2 rounded-lg bg-muted/50 text-xs">
+                          <div className="flex items-center gap-1 mb-1">
+                            <Badge className={`text-[9px] h-4 ${severityColors[f.severity] || ''}`}>{f.severity}</Badge>
+                            <span className="font-medium">{f.title || f.category}</span>
+                            {f.t3Attested && (
+                              <Badge variant="outline" className="text-[8px] border-emerald-500 text-emerald-600 ml-auto">
+                                <Lock className="h-2 w-2 mr-0.5" />T3
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-muted-foreground">{f.description}</p>
+                          {f.recommendation && (
+                            <p className="text-emerald-600 mt-1">→ {f.recommendation}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {selectedReport.recommendations.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold mb-2">Recommendations</h4>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {selectedReport.recommendations.map((rec, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs">
+                          <CheckCircle2 className="h-3 w-3 text-emerald-500 mt-0.5 flex-shrink-0" />
+                          <span>{rec}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-[10px] text-muted-foreground">
+                  Generated: {new Date(selectedReport.createdAt).toLocaleString()}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+                <div className="text-center">
+                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                  <p>Select a report to view details</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Timeline Tab */}
+      {activeTab === 'timeline' && (
+        <div className="border border-border rounded-xl p-5 bg-card">
+          <h3 className="font-semibold mb-4 flex items-center gap-2">
+            <Clock className="h-4 w-4" /> Verification & Report Timeline
+          </h3>
+          {timelineEvents.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <Clock className="h-8 w-8 mx-auto mb-2 opacity-20" />
+              <p>No events yet. Create a verification or generate a report.</p>
+            </div>
+          ) : (
+            <div className="space-y-0 max-h-[600px] overflow-y-auto">
+              {timelineEvents.map((event, i) => (
+                <div key={event.id} className="flex gap-3 pb-4">
+                  {/* Timeline connector */}
+                  <div className="flex flex-col items-center">
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center text-white text-xs flex-shrink-0 ${
+                      event.status === 'completed' ? 'bg-emerald-500' :
+                      event.status === 'in_progress' ? 'bg-amber-500' :
+                      event.status === 'flagged' ? 'bg-orange-500' :
+                      event.status === 'failed' ? 'bg-red-500' : 'bg-gray-400'
+                    }`}>
+                      {event.type === 'verification' ? <ClipboardCheck className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                    </div>
+                    {i < timelineEvents.length - 1 && <div className="w-0.5 flex-1 bg-border mt-1" />}
+                  </div>
+                  {/* Event content */}
+                  <div className="flex-1 min-w-0 pb-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{event.title}</span>
+                        <Badge className={`text-[9px] ${statusColors[event.status] || 'bg-gray-100 text-gray-700'}`}>
+                          {event.status.replace(/_/g, ' ')}
+                        </Badge>
+                        {event.t3Verified && (
+                          <Badge variant="outline" className="text-[8px] border-emerald-500 text-emerald-600">
+                            <Lock className="h-2 w-2 mr-0.5" />T3
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                        {new Date(event.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{event.propertyName}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[10px] text-muted-foreground">Risk:</span>
+                      <div className="w-16 bg-muted rounded-full h-1.5">
+                        <div className={`h-1.5 rounded-full ${getRiskBg(event.riskScore)}`} style={{ width: `${event.riskScore}%` }} />
+                      </div>
+                      <span className={`text-[10px] font-medium ${getRiskColor(event.riskScore)}`}>{event.riskScore}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1324,6 +2735,593 @@ function AutonomousPurchaseView() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Trust Score Engine View ──────────────────────────────────────────────────
+
+function TrustEngineView() {
+  const { trustProfiles, identities, agents, properties, calculateTrustScore, fetchTrustProfiles } = useTrustLandStore();
+  const [selectedEntity, setSelectedEntity] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetchTrustProfiles();
+  }, [fetchTrustProfiles]);
+
+  const getTrustBadgeColor = (score: number) => {
+    if (score >= 80) return 'bg-emerald-500 text-white';
+    if (score >= 60) return 'bg-amber-500 text-white';
+    if (score >= 40) return 'bg-orange-500 text-white';
+    return 'bg-red-500 text-white';
+  };
+
+  const getTrustLabel = (score: number) => {
+    if (score >= 80) return 'Highly Trusted';
+    if (score >= 60) return 'Trusted';
+    if (score >= 40) return 'Moderate';
+    return 'Low Trust';
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return 'text-emerald-600';
+    if (score >= 60) return 'text-amber-600';
+    if (score >= 40) return 'text-orange-600';
+    return 'text-red-600';
+  };
+
+  const getBarColor = (score: number) => {
+    if (score >= 80) return 'bg-emerald-500';
+    if (score >= 60) return 'bg-amber-500';
+    if (score >= 40) return 'bg-orange-500';
+    return 'bg-red-500';
+  };
+
+  const selectedProfile = trustProfiles.find(p => p.entityId === selectedEntity);
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Trust Score Engine</h1>
+          <p className="text-muted-foreground text-sm">Dynamic trust scoring for users, agents, and properties with automatic updates</p>
+        </div>
+        <Badge variant="outline" className="border-emerald-500 text-emerald-600">
+          <Star className="h-3 w-3 mr-1" /> Auto-Updating
+        </Badge>
+      </div>
+
+      {/* Trust Score Formula */}
+      <div className="border border-border rounded-xl p-5 bg-card">
+        <h3 className="font-semibold mb-3 flex items-center gap-2"><Zap className="h-4 w-4" /> Trust Score Formula</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+          <div>
+            <p className="font-medium text-emerald-600 mb-2">Base Score: 50</p>
+            <div className="space-y-1 text-xs">
+              <p className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-500" /> +10 Verified Identity</p>
+              <p className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-500" /> +10 Verified Ownership</p>
+              <p className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-500" /> +15 Successful Transactions</p>
+              <p className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3 text-emerald-500" /> +5 Positive Reviews</p>
+            </div>
+          </div>
+          <div>
+            <p className="font-medium text-red-600 mb-2">Penalties</p>
+            <div className="space-y-1 text-xs">
+              <p className="flex items-center gap-1"><AlertTriangle className="h-3 w-3 text-red-500" /> -15 Per Dispute</p>
+              <p className="flex items-center gap-1"><AlertTriangle className="h-3 w-3 text-red-500" /> -20 Per Fraud Report</p>
+            </div>
+          </div>
+          <div>
+            <p className="font-medium text-violet-600 mb-2">Auto-Updates On</p>
+            <div className="space-y-1 text-xs">
+              <p>Every verification event</p>
+              <p>Every transaction completion</p>
+              <p>Every attestation change</p>
+              <p>Every dispute resolution</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Entity List */}
+        <div className="border border-border rounded-xl p-5 bg-card">
+          <h3 className="font-semibold mb-4">Entities</h3>
+          <div className="space-y-2 max-h-[500px] overflow-y-auto">
+            {/* Users */}
+            {identities.map(identity => {
+              const profile = trustProfiles.find(p => p.entityId === identity.did);
+              const score = profile?.trustScore || 0;
+              return (
+                <div key={identity.did} className={`p-3 rounded-lg cursor-pointer transition-colors ${selectedEntity === identity.did ? 'bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300' : 'bg-muted/50 hover:bg-muted'}`} onClick={() => setSelectedEntity(identity.did)}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Badge className={`text-[10px] ${getTrustBadgeColor(score)}`}>{score}</Badge>
+                      <div>
+                        <p className="text-sm font-medium">{identity.profile.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{identity.credentialType}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">User</span>
+                  </div>
+                </div>
+              );
+            })}
+            {/* Agents */}
+            {agents.map(agent => {
+              const profile = trustProfiles.find(p => p.entityId === agent.id);
+              const score = profile?.trustScore || agent.trustScore;
+              return (
+                <div key={agent.id} className={`p-3 rounded-lg cursor-pointer transition-colors ${selectedEntity === agent.id ? 'bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300' : 'bg-muted/50 hover:bg-muted'}`} onClick={() => setSelectedEntity(agent.id)}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Badge className={`text-[10px] ${getTrustBadgeColor(score)}`}>{Math.round(score)}</Badge>
+                      <div>
+                        <p className="text-sm font-medium">{agent.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{agent.agentType}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">Agent</span>
+                  </div>
+                </div>
+              );
+            })}
+            {/* Properties */}
+            {properties.map(prop => {
+              const profile = trustProfiles.find(p => p.entityId === prop.id);
+              const score = profile?.trustScore || prop.trustScore;
+              return (
+                <div key={prop.id} className={`p-3 rounded-lg cursor-pointer transition-colors ${selectedEntity === prop.id ? 'bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300' : 'bg-muted/50 hover:bg-muted'}`} onClick={() => setSelectedEntity(prop.id)}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Badge className={`text-[10px] ${getTrustBadgeColor(score)}`}>{Math.round(score)}</Badge>
+                      <div>
+                        <p className="text-sm font-medium">{prop.title}</p>
+                        <p className="text-[10px] text-muted-foreground">{prop.city}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground">Property</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Trust Score Meter & Breakdown */}
+        <div className="lg:col-span-2 space-y-6">
+          {selectedProfile ? (
+            <>
+              {/* Trust Score Meter */}
+              <div className="border border-border rounded-xl p-6 bg-card text-center">
+                <div className="mb-4">
+                  <h3 className="font-semibold mb-2">Trust Score</h3>
+                  <div className="relative inline-flex items-center justify-center">
+                    <div className="w-40 h-40 rounded-full border-8 flex items-center justify-center" style={{ borderColor: selectedProfile.trustScore >= 80 ? '#10b981' : selectedProfile.trustScore >= 60 ? '#f59e0b' : selectedProfile.trustScore >= 40 ? '#f97316' : '#ef4444' }}>
+                      <div>
+                        <p className={`text-4xl font-bold ${getScoreColor(selectedProfile.trustScore)}`}>{Math.round(selectedProfile.trustScore)}</p>
+                        <p className="text-xs text-muted-foreground">of 100</p>
+                      </div>
+                    </div>
+                  </div>
+                  <Badge className={`mt-3 ${getTrustBadgeColor(selectedProfile.trustScore)}`}>{getTrustLabel(selectedProfile.trustScore)}</Badge>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {selectedProfile.entityType === 'user' ? 'User' : selectedProfile.entityType === 'agent' ? 'Agent' : 'Property'} • Updated {new Date(selectedProfile.lastUpdated).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              {/* Trust Breakdown */}
+              <div className="border border-border rounded-xl p-5 bg-card">
+                <h3 className="font-semibold mb-4">Trust Breakdown</h3>
+                <div className="space-y-4">
+                  {[
+                    { label: 'Identity Verified', value: selectedProfile.scoringFactors.identityVerified, points: 10, type: 'boolean' },
+                    { label: 'Ownership Verified', value: selectedProfile.scoringFactors.ownershipVerified, points: 10, type: 'boolean' },
+                    { label: 'Completed Transactions', value: selectedProfile.scoringFactors.completedTransactions, points: 15, type: 'count' },
+                    { label: 'Positive Reviews', value: selectedProfile.scoringFactors.positiveReviews, points: 5, type: 'count' },
+                    { label: 'Account Age', value: selectedProfile.scoringFactors.accountAgeDays, points: 5, type: 'days' },
+                    { label: 'Successful Workflows', value: selectedProfile.scoringFactors.successfulWorkflows, points: 15, type: 'count' },
+                    { label: 'Verification Accuracy', value: selectedProfile.scoringFactors.verificationAccuracy, points: 10, type: 'percentage' },
+                    { label: 'User Rating', value: selectedProfile.scoringFactors.userRating, points: 5, type: 'percentage' },
+                    { label: 'Disputes', value: selectedProfile.disputes, points: -15, type: 'penalty' },
+                    { label: 'Fraud Reports', value: selectedProfile.fraudReports, points: -20, type: 'penalty' },
+                  ].map((factor, i) => (
+                    <div key={i}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm">{factor.label}</span>
+                        <span className={`text-sm font-medium ${factor.type === 'penalty' ? 'text-red-600' : 'text-emerald-600'}`}>
+                          {factor.type === 'boolean' ? (factor.value ? `+${factor.points}` : '+0') :
+                           factor.type === 'penalty' ? `${factor.points} × ${factor.value}` :
+                           factor.type === 'percentage' ? `+${Math.round(Number(factor.value) * factor.points / 100)}` :
+                           factor.type === 'days' ? `+${Math.min(Math.floor(Number(factor.value) / 30), factor.points)}` :
+                           `+${Math.min(Number(factor.value) * 5, factor.points)}`}
+                        </span>
+                      </div>
+                      {factor.type === 'boolean' ? (
+                        <div className="flex items-center gap-2">
+                          {factor.value ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <AlertTriangle className="h-4 w-4 text-gray-400" />}
+                          <div className="flex-1 bg-muted rounded-full h-2">
+                            <div className={`h-2 rounded-full ${factor.value ? 'bg-emerald-500' : 'bg-gray-300'}`} style={{ width: factor.value ? '100%' : '0%' }} />
+                          </div>
+                        </div>
+                      ) : factor.type === 'penalty' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-red-600">{Number(factor.value)} incident{Number(factor.value) !== 1 ? 's' : ''}</span>
+                          <div className="flex-1 bg-muted rounded-full h-2">
+                            <div className="h-2 rounded-full bg-red-500" style={{ width: `${Math.min(Number(factor.value) * 30, 100)}%` }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">{String(factor.value)}</span>
+                          <div className="flex-1 bg-muted rounded-full h-2">
+                            <div className={`h-2 rounded-full ${getBarColor(selectedProfile.trustScore)}`} style={{ width: `${Math.min(Number(factor.value) * 20, 100)}%` }} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="border border-border rounded-xl p-10 bg-card text-center text-muted-foreground">
+              <Star className="h-12 w-12 mx-auto mb-3 opacity-20" />
+              <p>Select an entity to view trust score details</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Audit Ledger Dashboard ─────────────────────────────────────────────────
+
+function AuditLedgerDashboard() {
+  const { auditLedger, auditLedgerBlockHeight, fetchAuditLedger, verifyAuditLedger } = useTrustLandStore();
+  const [filterAction, setFilterAction] = React.useState<string>('all');
+  const [filterResourceType, setFilterResourceType] = React.useState<string>('all');
+  const [verificationResult, setVerificationResult] = React.useState<{ valid: boolean; totalEntries: number; invalidBlock: number | null; tamperedEntries: string[] } | null>(null);
+
+  const actions = ['all', ...new Set(auditLedger.map(e => e.action))];
+  const resourceTypes = ['all', ...new Set(auditLedger.map(e => e.resourceType))];
+
+  const filtered = auditLedger.filter(e => {
+    if (filterAction !== 'all' && e.action !== filterAction) return false;
+    if (filterResourceType !== 'all' && e.resourceType !== filterResourceType) return false;
+    return true;
+  });
+
+  const handleVerify = async () => {
+    const result = await verifyAuditLedger();
+    if (result) setVerificationResult(result as { valid: boolean; totalEntries: number; invalidBlock: number | null; tamperedEntries: string[] });
+  };
+
+  const handleExport = async (format: 'json' | 'csv') => {
+    try {
+      const response = await fetch(`/api/audit-ledger/export?format=${format}`);
+      const data = await response.json();
+      const blob = new Blob([data.data], { type: format === 'json' ? 'application/json' : 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit-ledger-${Date.now()}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Audit ledger exported as ${format.toUpperCase()}`);
+    } catch (e) { console.error('Export failed:', e); }
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Immutable Audit Ledger</h1>
+          <p className="text-muted-foreground text-sm">Hash-chain linked, tamper-detectable audit trail with T3 attestation</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="border-emerald-500 text-emerald-600">
+            <Lock className="h-3 w-3 mr-1" /> Block Height: {auditLedgerBlockHeight}
+          </Badge>
+          <Button size="sm" variant="outline" className="text-xs" onClick={handleVerify}>
+            <Shield className="h-3 w-3 mr-1" /> Verify Chain
+          </Button>
+          <Button size="sm" variant="outline" className="text-xs" onClick={() => handleExport('json')}>Export JSON</Button>
+          <Button size="sm" variant="outline" className="text-xs" onClick={() => handleExport('csv')}>Export CSV</Button>
+        </div>
+      </div>
+
+      {/* Verification Result */}
+      {verificationResult && (
+        <div className={`border rounded-xl p-4 ${verificationResult.valid ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' : 'border-red-500 bg-red-50 dark:bg-red-950/20'}`}>
+          <div className="flex items-center gap-2">
+            {verificationResult.valid ? <CheckCircle2 className="h-5 w-5 text-emerald-600" /> : <AlertTriangle className="h-5 w-5 text-red-600" />}
+            <span className="font-semibold">{verificationResult.valid ? 'Audit Ledger Integrity: VALID' : 'Audit Ledger TAMPERED!'}</span>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">{verificationResult.totalEntries} entries verified</p>
+          {verificationResult.invalidBlock !== null && <p className="text-sm text-red-600">Invalid block at index: {verificationResult.invalidBlock}</p>}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex gap-3 flex-wrap">
+        <Select value={filterAction} onValueChange={setFilterAction}>
+          <SelectTrigger className="w-48 h-8 text-xs"><SelectValue placeholder="Filter Action" /></SelectTrigger>
+          <SelectContent>
+            {actions.map(a => <SelectItem key={a} value={a}>{a === 'all' ? 'All Actions' : a.replace(/_/g, ' ')}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={filterResourceType} onValueChange={setFilterResourceType}>
+          <SelectTrigger className="w-48 h-8 text-xs"><SelectValue placeholder="Filter Resource" /></SelectTrigger>
+          <SelectContent>
+            {resourceTypes.map(r => <SelectItem key={r} value={r}>{r === 'all' ? 'All Resources' : r.replace(/_/g, ' ')}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Audit Table */}
+      <div className="border border-border rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-medium">#</th>
+                <th className="text-left p-3 font-medium">Action</th>
+                <th className="text-left p-3 font-medium">Actor</th>
+                <th className="text-left p-3 font-medium">Resource</th>
+                <th className="text-left p-3 font-medium">Hash</th>
+                <th className="text-left p-3 font-medium">Prev Hash</th>
+                <th className="text-left p-3 font-medium">T3</th>
+                <th className="text-left p-3 font-medium">Timestamp</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0, 100).map((entry, i) => (
+                <tr key={entry.id} className={i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}>
+                  <td className="p-3 font-mono text-muted-foreground">{i + 1}</td>
+                  <td className="p-3"><Badge variant="outline" className="text-[10px]">{entry.action.replace(/_/g, ' ')}</Badge></td>
+                  <td className="p-3 font-mono truncate max-w-[120px]">{entry.actorId.slice(0, 16)}...</td>
+                  <td className="p-3"><span className="text-[10px]">{entry.resourceType}</span> <span className="text-muted-foreground">{entry.resourceId.slice(0, 8)}...</span></td>
+                  <td className="p-3 font-mono text-muted-foreground truncate max-w-[100px]">{entry.hash.slice(0, 12)}...</td>
+                  <td className="p-3 font-mono text-muted-foreground truncate max-w-[100px]">{entry.previousHash ? entry.previousHash.slice(0, 12) + '...' : 'GENESIS'}</td>
+                  <td className="p-3">
+                    {entry.t3Attestation?.agentAuthVerified ? (
+                      <Badge variant="outline" className="text-[8px] border-emerald-500 text-emerald-600"><Lock className="h-2 w-2 mr-0.5" />T3</Badge>
+                    ) : '-'}
+                  </td>
+                  <td className="p-3 text-muted-foreground">{new Date(entry.timestamp).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {filtered.length === 0 && (
+        <div className="text-center py-10 text-muted-foreground">
+          <BookOpen className="h-12 w-12 mx-auto mb-3 opacity-20" />
+          <p>No audit entries found</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Enterprise Analytics Dashboard ──────────────────────────────────────────
+
+function AnalyticsDashboard() {
+  const { analyticsMetrics, fetchAnalytics, properties } = useTrustLandStore();
+  const [regionFilter, setRegionFilter] = React.useState<string>('all');
+  const [roleView, setRoleView] = React.useState<string>('admin');
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const filters: Record<string, string> = {};
+    if (regionFilter !== 'all') filters.region = regionFilter;
+    if (roleView !== 'admin') filters.role = roleView;
+    setError(null);
+    fetchAnalytics(filters).catch((e) => setError(e?.message || 'Failed to load analytics'));
+  }, [regionFilter, roleView, fetchAnalytics]);
+
+  const regions = ['all', ...new Set(properties.map(p => p.region))];
+
+  if (error) return (
+    <div className="p-8 text-center">
+      <AlertTriangle className="h-10 w-10 mx-auto text-amber-500 mb-2" />
+      <p className="text-sm text-muted-foreground mb-3">{error}</p>
+      <Button size="sm" variant="outline" onClick={() => fetchAnalytics()}>Retry</Button>
+    </div>
+  );
+  if (!analyticsMetrics) return <div className="p-8 text-center text-muted-foreground">
+    <Activity className="h-8 w-8 mx-auto mb-2 animate-pulse" /> Loading analytics…
+  </div>;
+
+  // Role-scoped insights — what each role sees in the metrics
+  const roleInsights: Record<string, string> = {
+    admin: 'Full platform visibility — all properties, agents, transactions, and ledger events.',
+    government: 'Registry & compliance focus — verification rates, flagged properties, and audit ledger integrity.',
+    institution: 'Financing focus — transaction volume, average prices, and active mortgages in your portfolio.',
+    bank: 'Risk & escrow focus — trust score distribution, due-diligence reports, and active escrow transactions.',
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Enterprise Analytics Dashboard</h1>
+          <p className="text-muted-foreground text-sm">Live metrics, trends, and insights from the TrustLand platform</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={regionFilter} onValueChange={setRegionFilter}>
+            <SelectTrigger className="w-40 h-8 text-xs"><SelectValue placeholder="Region" /></SelectTrigger>
+            <SelectContent>
+              {regions.map(r => <SelectItem key={r} value={r}>{r === 'all' ? 'All Regions' : r}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={roleView} onValueChange={setRoleView}>
+            <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="Role" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="government">Government</SelectItem>
+              <SelectItem value="institution">Institution</SelectItem>
+              <SelectItem value="bank">Bank</SelectItem>
+            </SelectContent>
+          </Select>
+          <Badge variant="outline" className="border-emerald-500 text-emerald-600"><Activity className="h-3 w-3 mr-1" /> Live</Badge>
+        </div>
+      </div>
+
+      {/* Role insight banner — explains what the role filter does */}
+      <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 text-sm text-emerald-800 dark:text-emerald-200">
+        <strong className="font-medium capitalize">{roleView} View:</strong> {roleInsights[roleView]}
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+        {[
+          { label: 'Total Properties', value: analyticsMetrics.totalProperties, color: 'text-emerald-600' },
+          { label: 'Verified', value: analyticsMetrics.verifiedProperties, color: 'text-teal-600' },
+          { label: 'Verification Rate', value: `${analyticsMetrics.verificationSuccessRate}%`, color: 'text-sky-600' },
+          { label: 'Avg Trust Score', value: analyticsMetrics.averageTrustScore, color: 'text-amber-600' },
+          { label: 'Active Agents', value: `${analyticsMetrics.activeAgents}/${analyticsMetrics.totalAgents}`, color: 'text-violet-600' },
+          { label: 'Transaction Vol.', value: `$${(analyticsMetrics.transactionVolume / 1000000).toFixed(1)}M`, color: 'text-rose-600' },
+          { label: 'Audit Entries', value: analyticsMetrics.auditLedgerEntries, color: 'text-indigo-600' },
+        ].map((kpi, i) => (
+          <div key={i} className="border border-border rounded-xl p-4 bg-card">
+            <p className="text-[10px] text-muted-foreground mb-1">{kpi.label}</p>
+            <p className={`text-xl font-bold ${kpi.color}`}>{kpi.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Trust Score Trends */}
+        <div className="border border-border rounded-xl p-5 bg-card">
+          <h3 className="font-semibold mb-4 flex items-center gap-2"><Star className="h-4 w-4" /> Trust Score Trends (7 Days)</h3>
+          <div className="space-y-3">
+            {analyticsMetrics.trustScoreTrends.map((trend, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-20 flex-shrink-0">{trend.date}</span>
+                <div className="flex-1 bg-muted rounded-full h-4 relative">
+                  <div className="bg-emerald-500 h-4 rounded-full transition-all flex items-center justify-end pr-2" style={{ width: `${trend.avgScore}%` }}>
+                    <span className="text-[9px] text-white font-medium">{trend.avgScore}</span>
+                  </div>
+                </div>
+                <span className="text-[10px] text-muted-foreground w-16">{trend.transactions} tx</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Verification Activity */}
+        <div className="border border-border rounded-xl p-5 bg-card">
+          <h3 className="font-semibold mb-4 flex items-center gap-2"><ClipboardCheck className="h-4 w-4" /> Verification Activity (7 Days)</h3>
+          <div className="space-y-3">
+            {analyticsMetrics.verificationActivity.map((day, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-20 flex-shrink-0">{day.date}</span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-1 mb-1">
+                    <div className="flex-1 bg-muted rounded-full h-2">
+                      <div className="bg-teal-500 h-2 rounded-full" style={{ width: `${Math.min(day.verifications * 20, 100)}%` }} />
+                    </div>
+                    <span className="text-[10px] text-muted-foreground w-6">{day.verifications}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="flex-1 bg-muted rounded-full h-2">
+                      <div className="bg-amber-500 h-2 rounded-full" style={{ width: `${Math.min(day.reports * 25, 100)}%` }} />
+                    </div>
+                    <span className="text-[10px] text-muted-foreground w-6">{day.reports}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-4 mt-3 text-xs">
+            <span className="flex items-center gap-1"><div className="w-3 h-2 rounded bg-teal-500" /> Verifications</span>
+            <span className="flex items-center gap-1"><div className="w-3 h-2 rounded bg-amber-500" /> Reports</span>
+          </div>
+        </div>
+
+        {/* Transaction Pipeline */}
+        <div className="border border-border rounded-xl p-5 bg-card">
+          <h3 className="font-semibold mb-4 flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" /> Transaction Pipeline</h3>
+          <div className="space-y-2">
+            {Object.entries(analyticsMetrics.transactionPipeline).map(([stage, count]) => (
+              <div key={stage} className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground w-32 flex-shrink-0 capitalize">{stage.replace(/_/g, ' ')}</span>
+                <div className="flex-1 bg-muted rounded-full h-4 relative">
+                  <div className="bg-indigo-500 h-4 rounded-full transition-all flex items-center justify-end pr-2" style={{ width: `${Math.max(count * 25, count > 0 ? 8 : 0)}%` }}>
+                    {count > 0 && <span className="text-[9px] text-white font-medium">{count}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Risk Distribution */}
+        <div className="border border-border rounded-xl p-5 bg-card">
+          <h3 className="font-semibold mb-4 flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> Risk Distribution</h3>
+          <div className="space-y-4">
+            {[
+              { label: 'Low Risk', count: analyticsMetrics.riskDistribution.low, color: 'bg-emerald-500', pct: analyticsMetrics.riskDistribution.low ? Math.round(analyticsMetrics.riskDistribution.low / Math.max(Object.values(analyticsMetrics.riskDistribution).reduce((a, b) => a + b, 0), 1) * 100) : 0 },
+              { label: 'Medium Risk', count: analyticsMetrics.riskDistribution.medium, color: 'bg-amber-500', pct: analyticsMetrics.riskDistribution.medium ? Math.round(analyticsMetrics.riskDistribution.medium / Math.max(Object.values(analyticsMetrics.riskDistribution).reduce((a, b) => a + b, 0), 1) * 100) : 0 },
+              { label: 'High Risk', count: analyticsMetrics.riskDistribution.high, color: 'bg-orange-500', pct: analyticsMetrics.riskDistribution.high ? Math.round(analyticsMetrics.riskDistribution.high / Math.max(Object.values(analyticsMetrics.riskDistribution).reduce((a, b) => a + b, 0), 1) * 100) : 0 },
+              { label: 'Critical Risk', count: analyticsMetrics.riskDistribution.critical, color: 'bg-red-500', pct: analyticsMetrics.riskDistribution.critical ? Math.round(analyticsMetrics.riskDistribution.critical / Math.max(Object.values(analyticsMetrics.riskDistribution).reduce((a, b) => a + b, 0), 1) * 100) : 0 },
+            ].map((item, i) => (
+              <div key={i}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm">{item.label}</span>
+                  <span className="text-sm font-medium">{item.count} ({item.pct}%)</span>
+                </div>
+                <div className="w-full bg-muted rounded-full h-3">
+                  <div className={`h-3 rounded-full ${item.color}`} style={{ width: `${item.pct}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Agent Activity Table */}
+      <div className="border border-border rounded-xl p-5 bg-card">
+        <h3 className="font-semibold mb-4 flex items-center gap-2"><Bot className="h-4 w-4" /> Agent Activity</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-medium">Agent</th>
+                <th className="text-left p-3 font-medium">Type</th>
+                <th className="text-left p-3 font-medium">Trust Score</th>
+                <th className="text-left p-3 font-medium">Actions</th>
+                <th className="text-left p-3 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analyticsMetrics.agentActivity.map((agent, i) => (
+                <tr key={agent.agentId} className={i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}>
+                  <td className="p-3 font-medium">{agent.name}</td>
+                  <td className="p-3"><Badge variant="outline" className="text-[10px]">{agent.type}</Badge></td>
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 bg-muted rounded-full h-2">
+                        <div className={`h-2 rounded-full ${agent.trustScore >= 80 ? 'bg-emerald-500' : agent.trustScore >= 60 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${agent.trustScore}%` }} />
+                      </div>
+                      <span className="font-medium">{agent.trustScore}%</span>
+                    </div>
+                  </td>
+                  <td className="p-3">{agent.actions}</td>
+                  <td className="p-3">
+                    <Badge variant="outline" className={`text-[10px] ${agent.status === 'busy' || agent.status === 'active' ? 'border-emerald-500 text-emerald-600' : 'border-gray-400 text-gray-500'}`}>{agent.status}</Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

@@ -3,9 +3,42 @@
 // Provides: discovery, token exchange, refresh, introspection, JWKS
 // Each agent authenticates via @agent-auth/sdk against this server
 
-import { SignJWT, jwtVerify, exportJWK } from 'jose';
-import { generateKeyPairSync, type KeyObject } from 'crypto';
-import { hashData, generateApiKey, type Ed25519KeyPair } from './t3-crypto';
+import { SignJWT, jwtVerify, exportJWK, importJWK, type JWK, type KeyLike } from 'jose';
+import { generateEd25519KeyPair, hashData, generateApiKey, type Ed25519KeyPair } from './t3-crypto';
+
+// ─── Jose Key Conversion Helpers ──────────────────────────────────────────────
+// jose v5+ requires CryptoKey/KeyObject/JWK for EdDSA — raw Uint8Array is rejected.
+// These helpers convert tweetnacl Ed25519 key pairs to/from jose-compatible JWK.
+
+/**
+ * Convert a tweetnacl Ed25519 key pair to a JWK (JSON Web Key) for use with jose.
+ * Ed25519 secret keys in tweetnacl are 64 bytes = 32-byte seed + 32-byte public key.
+ * jose expects the JWK "d" field to contain just the 32-byte seed (per RFC 8037).
+ */
+function ed25519KeyPairToPrivateJWK(keyPair: Ed25519KeyPair, kid: string = 't3-server-key-1'): JWK {
+  // tweetnacl secretKey is 64 bytes: first 32 = seed, last 32 = public key
+  const seedBytes = keyPair.privateKey.slice(0, 32);
+  return {
+    kty: 'OKP',
+    crv: 'Ed25519',
+    d: Buffer.from(seedBytes).toString('base64url'),
+    x: keyPair.publicKeyBase64,
+    kid,
+    alg: 'EdDSA',
+    use: 'sig',
+  };
+}
+
+function ed25519PublicKeyToJWK(publicKeyBase64: string, kid: string = 't3-server-key-1'): JWK {
+  return {
+    kty: 'OKP',
+    crv: 'Ed25519',
+    x: publicKeyBase64,
+    kid,
+    alg: 'EdDSA',
+    use: 'sig',
+  };
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -76,8 +109,13 @@ export interface T3VerifiableCredential {
 // ─── T3 Agent Auth Server ────────────────────────────────────────────────────
 
 class T3AgentAuthServer {
-  private serverPublicKey: KeyObject;
-  private serverPrivateKey: KeyObject;
+  private serverKeyPair: Ed25519KeyPair;
+  /** Jose-compatible private key (KeyObject) for signing JWTs */
+  private serverPrivateKey: KeyLike | Uint8Array;
+  /** Jose-compatible public key (KeyObject) for verifying JWTs */
+  private serverPublicKey: KeyLike | Uint8Array;
+  /** The JWK form of the public key, returned by the JWKS endpoint */
+  private serverPublicJWK: JWK;
   private registeredAgents: Map<string, T3AgentRegistration> = new Map();
   private apiKeys: Map<string, string> = new Map(); // apiKey -> agentId
   private refreshTokens: Map<string, { agentId: string; scope: string; exp: number }> = new Map();
@@ -85,9 +123,29 @@ class T3AgentAuthServer {
   private verifiableCredentials: Map<string, T3VerifiableCredential> = new Map();
 
   constructor() {
-    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-    this.serverPublicKey = publicKey;
-    this.serverPrivateKey = privateKey;
+    this.serverKeyPair = generateEd25519KeyPair();
+    this.serverPublicJWK = ed25519PublicKeyToJWK(this.serverKeyPair.publicKeyBase64);
+    // Convert raw tweetnacl key pair to jose-compatible KeyObjects.
+    // We do this synchronously by caching the JWK; the actual importJWK call is async,
+    // so we lazy-load the KeyObject on first use.
+    this.serverPrivateKey = new Uint8Array(this.serverKeyPair.privateKey);
+    this.serverPublicKey = new Uint8Array(this.serverKeyPair.publicKey);
+  }
+
+  /**
+   * Lazily import the server private key as a jose KeyObject.
+   * jose v5+ rejects raw Uint8Array for EdDSA — must be CryptoKey/KeyObject/JWK.
+   */
+  private async getSigningKey(): Promise<KeyLike> {
+    const privateJWK = ed25519KeyPairToPrivateJWK(this.serverKeyPair);
+    return await importJWK(privateJWK) as KeyLike;
+  }
+
+  /**
+   * Lazily import the server public key as a jose KeyObject for verification.
+   */
+  private async getVerificationKey(): Promise<KeyLike> {
+    return await importJWK(this.serverPublicJWK) as KeyLike;
   }
 
   // ─── Discovery Endpoint ──────────────────────────────────────────────────
@@ -122,11 +180,11 @@ class T3AgentAuthServer {
   // ─── JWKS Endpoint ──────────────────────────────────────────────────────
 
   async getJWKS() {
-    const pubKey = await this.getPublicKeyJWK();
+    // Return the persistent server public key (not a fresh keypair)
     return {
       keys: [
         {
-          ...pubKey,
+          ...this.serverPublicJWK,
           kid: 't3-server-key-1',
           use: 'sig',
           alg: 'EdDSA',
@@ -136,7 +194,7 @@ class T3AgentAuthServer {
   }
 
   private async getPublicKeyJWK() {
-    return exportJWK(this.serverPublicKey);
+    return this.serverPublicJWK;
   }
 
   // ─── Agent Registration ──────────────────────────────────────────────────
@@ -188,7 +246,8 @@ class T3AgentAuthServer {
     const now = Math.floor(Date.now() / 1000);
     const expiresIn = 3600; // 1 hour
 
-    // Create JWT access token signed with the server's Ed25519 key
+    // Create JWT access token signed with the server's Ed25519 key (jose KeyObject)
+    const signingKey = await this.getSigningKey();
     const accessToken = await new SignJWT({
       sub: agent.did,
       agent_id: agent.agentId,
@@ -200,7 +259,7 @@ class T3AgentAuthServer {
       jti: crypto.randomUUID(),
     })
       .setProtectedHeader({ alg: 'EdDSA', kid: 't3-server-key-1' })
-      .sign(this.serverPrivateKey);
+      .sign(signingKey);
 
     // Create refresh token
     const refreshToken = `t3rt_${hashData(`${agentId}:${Date.now()}:${Math.random()}`)}`;
@@ -240,6 +299,7 @@ class T3AgentAuthServer {
     const expiresIn = 3600;
     const scopes = tokenData.scope.split(' ');
 
+    const signingKey = await this.getSigningKey();
     const accessToken = await new SignJWT({
       sub: agent.did,
       agent_id: agent.agentId,
@@ -251,7 +311,7 @@ class T3AgentAuthServer {
       jti: crypto.randomUUID(),
     })
       .setProtectedHeader({ alg: 'EdDSA', kid: 't3-server-key-1' })
-      .sign(this.serverPrivateKey);
+      .sign(signingKey);
 
     const newRefreshToken = `t3rt_${hashData(`${tokenData.agentId}:${Date.now()}:${Math.random()}`)}`;
     this.refreshTokens.delete(refreshToken);
@@ -274,8 +334,9 @@ class T3AgentAuthServer {
 
   async introspectToken(token: string): Promise<{ active: boolean; sub?: string; agent_id?: string; scope?: string; exp?: number }> {
     try {
-      // Verify the JWT signature using the server's public key
-      const { payload } = await jwtVerify(token, this.serverPublicKey, {
+      // Verify the JWT signature using the server's public key (jose KeyObject)
+      const verificationKey = await this.getVerificationKey();
+      const { payload } = await jwtVerify(token, verificationKey, {
         audience: 'trustland-platform',
       });
 
@@ -426,21 +487,8 @@ class T3AgentAuthServer {
 // ─── Singleton Instance ──────────────────────────────────────────────────────
 
 // Use globalThis to persist across HMR reloads
-const T3_AGENT_AUTH_SERVER_VERSION = 2;
-const globalForT3 = globalThis as unknown as {
-  __t3_agent_auth_server: T3AgentAuthServer | undefined;
-  __t3_agent_auth_server_version?: number;
-};
-
-if (
-  !globalForT3.__t3_agent_auth_server ||
-  globalForT3.__t3_agent_auth_server_version !== T3_AGENT_AUTH_SERVER_VERSION
-) {
-  globalForT3.__t3_agent_auth_server = new T3AgentAuthServer();
-  globalForT3.__t3_agent_auth_server_version = T3_AGENT_AUTH_SERVER_VERSION;
-}
-
-export const t3AgentAuthServer = globalForT3.__t3_agent_auth_server;
+const globalForT3 = globalThis as unknown as { __t3_agent_auth_server: T3AgentAuthServer | undefined };
+export const t3AgentAuthServer = globalForT3.__t3_agent_auth_server || new T3AgentAuthServer();
 globalForT3.__t3_agent_auth_server = t3AgentAuthServer;
 
 export default t3AgentAuthServer;

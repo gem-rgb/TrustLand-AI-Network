@@ -6,6 +6,7 @@ import { create } from 'zustand';
 
 export type ViewType =
   | 'overview'
+  | 'auth'              // NEW — login / verification
   | 'dashboard'
   | 'agents'
   | 'ledger'
@@ -14,7 +15,11 @@ export type ViewType =
   | 'trust-score'
   | 'messages'
   | 'identities'
-  | 'autonomous-purchase'; // NEW: The "Wow" feature view
+  | 'verification'
+  | 'autonomous-purchase'
+  | 'trust-engine'       // NEW
+  | 'audit-ledger'       // NEW
+  | 'analytics';         // NEW
 
 export interface T3Identity {
   did: string;
@@ -289,6 +294,89 @@ export interface AutonomousStep {
   signature: string | null;
 }
 
+// ── Trust Score Engine Types ──
+
+export interface TrustProfile {
+  id: string;
+  entityType: 'user' | 'seller' | 'agent' | 'property';
+  entityId: string;
+  trustScore: number;
+  verificationCount: number;
+  successfulTransactions: number;
+  disputes: number;
+  fraudReports: number;
+  lastUpdated: string;
+  createdAt: string;
+  scoringFactors: {
+    identityVerified: boolean;
+    ownershipVerified: boolean;
+    completedTransactions: number;
+    positiveReviews: number;
+    accountAgeDays: number;
+    historicalDisputes: number;
+    successfulWorkflows: number;
+    verificationAccuracy: number;
+    userRating: number;
+  };
+}
+
+export interface TransactionEvent {
+  id: string;
+  transactionId: string;
+  eventType: string;
+  actorId: string;
+  actorType: 'user' | 'agent' | 'system';
+  metadata: Record<string, unknown>;
+  timestamp: string;
+  signature: string;
+  signatureType: string;
+  t3AccessTokenJti?: string;
+}
+
+export interface AuditLedgerEntry {
+  id: string;
+  actorId: string;
+  actorType: 'user' | 'agent' | 'system';
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  metadata: Record<string, unknown>;
+  hash: string;
+  previousHash: string | null;
+  timestamp: string;
+  signature: string;
+  signatureType: string;
+  t3Attestation?: {
+    accessTokenJti: string;
+    agentAuthVerified: boolean;
+    authenticatedAt: string;
+  };
+}
+
+export interface AnalyticsMetrics {
+  totalProperties: number;
+  verifiedProperties: number;
+  verificationSuccessRate: number;
+  averageTrustScore: number;
+  activeAgents: number;
+  totalAgents: number;
+  transactionVolume: number;
+  totalTransactions: number;
+  riskDistribution: { low: number; medium: number; high: number; critical: number };
+  transactionPipeline: Record<string, number>;
+  trustScoreTrends: Array<{ date: string; avgScore: number; identities: number; transactions: number }>;
+  verificationActivity: Array<{ date: string; verifications: number; reports: number }>;
+  agentActivity: Array<{ agentId: string; name: string; type: string; trustScore: number; actions: number; status: string }>;
+  auditLedgerEntries: number;
+  trustProfilesCount: number;
+}
+
+export interface TransactionStageInfo {
+  key: string;
+  label: string;
+  order: number;
+}
+
 // ─── Store Interface ────────────────────────────────────────────────────────
 
 interface TrustLandStore {
@@ -326,6 +414,14 @@ interface TrustLandStore {
     allActionsSigned: boolean;
   } | null;
 
+  // New data
+  trustProfiles: TrustProfile[];
+  transactionEvents: TransactionEvent[];
+  auditLedger: AuditLedgerEntry[];
+  auditLedgerBlockHeight: number;
+  analyticsMetrics: AnalyticsMetrics | null;
+  transactionStages: TransactionStageInfo[];
+
   // Selected items
   selectedPropertyId: string | null;
   selectedTransactionId: string | null;
@@ -346,6 +442,7 @@ interface TrustLandStore {
   fetchTransactions: () => Promise<void>;
   fetchTrustLedger: () => Promise<void>;
   fetchDocuments: () => Promise<void>;
+  fetchRiskReports: () => Promise<void>;
   fetchMessages: () => Promise<void>;
   fetchAttestations: () => Promise<void>;
   fetchTransactionDetail: (id: string) => Promise<void>;
@@ -361,17 +458,41 @@ interface TrustLandStore {
   createAutonomousDelegation: (granterDid: string, granterName: string, criteria: Record<string, unknown>) => Promise<void>;
   executeAutonomousPurchase: (delegationId: string) => Promise<void>;
   fetchAutonomousDelegations: () => Promise<void>;
+
+  // New actions
+  fetchTrustProfiles: () => Promise<void>;
+  fetchTrustProfile: (entityId: string) => Promise<TrustProfile | null>;
+  calculateTrustScore: (entityType: string, entityId: string) => Promise<void>;
+  advanceTransactionStage: (transactionId: string, actorId: string, notes?: string) => Promise<void>;
+  fetchTransactionEvents: (transactionId: string) => Promise<void>;
+  assignAgent: (agentId: string, transactionId: string, role: string) => Promise<void>;
+  fetchAgentActivity: (agentId: string) => Promise<void>;
+  fetchAuditLedger: (filters?: Record<string, string>) => Promise<void>;
+  verifyAuditLedger: () => Promise<void>;
+  fetchAnalytics: (filters?: Record<string, string>) => Promise<void>;
+  fetchTransactionStages: () => Promise<void>;
 }
 
 // ─── API Helper ─────────────────────────────────────────────────────────────
 
 const API_BASE = '/api';
 
-async function apiFetch(path: string, options?: RequestInit) {
+async function apiFetch(path: string, options?: RequestInit, retries = 2): Promise<unknown> {
   const url = `${API_BASE}${path}`;
-  const response = await fetch(url, options);
-  if (!response.ok) throw new Error(`API Error: ${response.status}`);
-  return response.json();
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (!response.ok) throw new Error(`API Error: ${response.status}`);
+      return response.json();
+    } catch (err) {
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('Unreachable');
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -396,6 +517,13 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
   currentDelegationId: null,
   autonomousSteps: [],
   autonomousResult: null,
+
+  trustProfiles: [],
+  transactionEvents: [],
+  auditLedger: [],
+  auditLedgerBlockHeight: 0,
+  analyticsMetrics: null,
+  transactionStages: [],
 
   selectedPropertyId: null,
   selectedTransactionId: null,
@@ -452,6 +580,13 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       const data = await apiFetch('/documents');
       set({ documents: data });
     } catch (e) { console.error('Failed to fetch documents:', e); }
+  },
+
+  fetchRiskReports: async () => {
+    try {
+      const data = await apiFetch('/risk-reports');
+      set({ riskReports: data });
+    } catch (e) { console.error('Failed to fetch risk reports:', e); }
   },
 
   fetchMessages: async () => {
@@ -579,4 +714,99 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
   addLiveActivity: (activity) => set(state => ({
     liveAgentActivities: [activity, ...state.liveAgentActivities].slice(0, 50)
   })),
+
+  fetchTrustProfiles: async () => {
+    try {
+      const data = await apiFetch('/trust/profiles');
+      set({ trustProfiles: data });
+    } catch (e) { console.error('Failed to fetch trust profiles:', e); }
+  },
+
+  fetchTrustProfile: async (entityId: string) => {
+    try {
+      return await apiFetch(`/trust/${encodeURIComponent(entityId)}`);
+    } catch (e) { console.error('Failed to fetch trust profile:', e); return null; }
+  },
+
+  calculateTrustScore: async (entityType: string, entityId: string) => {
+    try {
+      await apiFetch('/trust/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityType, entityId })
+      });
+      await get().fetchTrustProfiles();
+      await get().fetchTrustLedger();
+    } catch (e) { console.error('Failed to calculate trust score:', e); }
+  },
+
+  advanceTransactionStage: async (transactionId: string, actorId: string, notes?: string) => {
+    try {
+      set({ isLoading: true });
+      await apiFetch('/transactions/advance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId, actorId, notes })
+      });
+      await get().fetchTransactions();
+      await get().fetchTrustLedger();
+      set({ isLoading: false });
+    } catch (e) { console.error('Failed to advance transaction:', e); set({ isLoading: false }); }
+  },
+
+  fetchTransactionEvents: async (transactionId: string) => {
+    try {
+      const data = await apiFetch(`/transaction-events?transactionId=${transactionId}`);
+      set({ transactionEvents: data });
+    } catch (e) { console.error('Failed to fetch transaction events:', e); }
+  },
+
+  assignAgent: async (agentId: string, transactionId: string, role: string) => {
+    try {
+      await apiFetch('/agents/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, transactionId, role })
+      });
+      await get().fetchAgents();
+      await get().fetchTrustLedger();
+    } catch (e) { console.error('Failed to assign agent:', e); }
+  },
+
+  fetchAgentActivity: async (agentId: string) => {
+    try {
+      const data = await apiFetch(`/agents/${agentId}/activity`);
+      set({ transactionEvents: data });
+    } catch (e) { console.error('Failed to fetch agent activity:', e); }
+  },
+
+  fetchAuditLedger: async (filters?: Record<string, string>) => {
+    try {
+      const params = filters ? '?' + new URLSearchParams(filters).toString() : '';
+      const data = await apiFetch(`/audit-ledger${params}`);
+      set({ auditLedger: data.entries || data, auditLedgerBlockHeight: data.blockHeight || 0 });
+    } catch (e) { console.error('Failed to fetch audit ledger:', e); }
+  },
+
+  verifyAuditLedger: async () => {
+    try {
+      const result = await apiFetch('/audit-ledger/verify');
+      return result;
+    } catch (e) { console.error('Failed to verify audit ledger:', e); }
+  },
+
+  fetchAnalytics: async (filters?: Record<string, string>) => {
+    try {
+      const params = filters ? '?' + new URLSearchParams(filters).toString() : '';
+      const data = await apiFetch(`/analytics${params}`);
+      set({ analyticsMetrics: data });
+    } catch (e) { console.error('Failed to fetch analytics:', e); }
+  },
+
+  fetchTransactionStages: async () => {
+    try {
+      const data = await apiFetch('/transaction-stages');
+      set({ transactionStages: data });
+    } catch (e) { console.error('Failed to fetch transaction stages:', e); }
+  },
 }));
