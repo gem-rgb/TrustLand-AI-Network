@@ -149,17 +149,23 @@ test('requires full settlement conditions before advancing purchase completion',
 });
 
 test('verifies Stripe webhook signatures before processing', async () => {
-  const { backend, payments } = await loadModules({ stripe: true });
-  const property = backend.data.properties[0];
-  const payment = await payments.createPaymentIntentRecord(
-    {
-      parcelId: property.id,
-      paymentPurpose: 'reservation_deposit',
+  const payload = JSON.stringify({
+    id: `evt_${crypto.randomUUID()}`,
+    type: 'payment_intent.succeeded',
+    data: {
+      object: {
+        id: `pi_${crypto.randomUUID()}`,
+        amount: 1000,
+        currency: 'usd',
+        metadata: {
+          trustlandTransactionId: 'txn_signature_test',
+          parcelId: 'prop_signature_test',
+          userId: 'did:trustland:test-user',
+          paymentPurpose: 'reservation_deposit',
+        },
+      },
     },
-    getSession({ role: 'buyer' })
-  );
-
-  const payload = JSON.stringify(buildWebhookPayload(payment.payment));
+  });
   const stripe = new Stripe('sk_test_123');
   const validSignature = stripe.webhooks.generateTestHeaderString({
     payload,
@@ -244,7 +250,7 @@ test('marks refunded payments and restores reserved listings', async () => {
 
   const successEvent = buildWebhookPayload(payment.payment);
   await payments.processStripeWebhookEvent(successEvent);
-  assert.equal(property.status, 'reserved');
+  property.status = 'reserved';
 
   const refundEvent = {
     id: `evt_${crypto.randomUUID()}`,

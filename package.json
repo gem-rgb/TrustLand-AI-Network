@@ -5,9 +5,9 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "dev:turbo": "next dev --port 3000 --turbopack",
-    "build": "next build",
+    "build": "node scripts/build.mjs",
     "start": "next start",
-    "test": "tsc -p tsconfig.tests.json && node --experimental-specifier-resolution=node scripts/run-payment-tests.cjs",
+    "test": "tsc -p tsconfig.tests.json && node --experimental-specifier-resolution=node scripts/run-payment-tests.mjs",
     "lint": "eslint .",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

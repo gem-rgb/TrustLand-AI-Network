@@ -869,11 +869,40 @@ async function resolveStripeChargePaymentIntentId(stripePaymentIntentId: string)
   }
 }
 
+async function resolvePaymentFromWebhookEvent(event: { type: string; data: { object: unknown } }) {
+  let stripePaymentIntentId = resolveStripePaymentIntentIdFromEvent(event);
+  if (event.type.startsWith('charge.') && stripePaymentIntentId) {
+    const maybePaymentIntentId = await resolveStripeChargePaymentIntentId(stripePaymentIntentId);
+    stripePaymentIntentId = maybePaymentIntentId || stripePaymentIntentId;
+  }
+
+  const payload = event.data.object as Record<string, unknown> & {
+    metadata?: Record<string, string>;
+  };
+
+  const metadata = payload.metadata || {};
+  const transactionId = metadata.trustlandTransactionId || metadata.transactionId || metadata.trustland_transaction_id;
+  const parcelId = metadata.parcelId;
+  const paymentPurpose = metadata.paymentPurpose;
+
+  const recordFromMetadata = paymentStore.paymentsByTransactionPurposeKey.get(
+    transactionId && parcelId && paymentPurpose && isPaymentPurpose(paymentPurpose)
+      ? paymentTransactionKey(transactionId, parcelId, paymentPurpose)
+      : ''
+  );
+  const recordFromStripe = stripePaymentIntentId ? paymentStore.paymentsByStripeIntentId.get(stripePaymentIntentId) : undefined;
+  const paymentId = recordFromStripe || recordFromMetadata;
+  if (!paymentId) return null;
+
+  return paymentStore.paymentsById.get(paymentId) || null;
+}
+
 export async function processStripeWebhookEvent(event: { id: string; type: string; data: { object: unknown } }) {
   if (paymentStore.processedWebhookEventIds.has(event.id)) {
+    const duplicateRecord = await resolvePaymentFromWebhookEvent(event);
     return {
       duplicate: true,
-      payment: null as PaymentRecord | null,
+      payment: duplicateRecord ? sanitizePaymentRecord(duplicateRecord) : null,
     };
   }
 
