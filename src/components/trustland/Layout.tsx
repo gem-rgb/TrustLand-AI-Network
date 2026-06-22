@@ -319,7 +319,7 @@ function OverviewView() {
             that securely act on behalf of verified users while preserving privacy and maintaining cryptographic accountability.
           </p>
           <div className="flex gap-4">
-            <Button size="lg" className="bg-white text-emerald-900 hover:bg-emerald-50" onClick={() => setCurrentView('dashboard')}>
+            <Button size="lg" className="bg-gradient-to-r from-orange-500 to-amber-400 text-white hover:from-orange-400 hover:to-amber-300" onClick={() => setCurrentView('dashboard')}>
               <LayoutDashboard className="mr-2 h-5 w-5" /> Open Dashboard
             </Button>
             <Button size="lg" variant="outline" className="border-emerald-400 text-emerald-100 hover:bg-emerald-800" onClick={() => setCurrentView('transactions')}>
@@ -2922,24 +2922,24 @@ function AutonomousPurchaseView() {
           <Fingerprint className="h-4 w-4" /> Terminal 3 Agent Auth Flow
         </h3>
         <div className="flex items-center gap-2 text-xs flex-wrap">
-          <div className="flex items-center gap-1 bg-white dark:bg-amber-900/30 px-3 py-2 rounded-lg border border-amber-200">
+          <div className="flex items-center gap-1 bg-amber-900/30 px-3 py-2 rounded-lg border border-amber-800/50">
             <Users className="h-3 w-3" /> <span className="font-medium">User Grants Authority</span>
           </div>
           <ChevronRight className="h-4 w-4 text-amber-500" />
-          <div className="flex items-center gap-1 bg-white dark:bg-amber-900/30 px-3 py-2 rounded-lg border border-amber-200">
+          <div className="flex items-center gap-1 bg-amber-900/30 px-3 py-2 rounded-lg border border-amber-800/50">
             <Key className="h-3 w-3" /> <span className="font-medium">T3 API Key Issued</span>
           </div>
           <ChevronRight className="h-4 w-4 text-amber-500" />
-          <div className="flex items-center gap-1 bg-white dark:bg-amber-900/30 px-3 py-2 rounded-lg border border-amber-200">
+          <div className="flex items-center gap-1 bg-amber-900/30 px-3 py-2 rounded-lg border border-amber-800/50">
             <Lock className="h-3 w-3" /> <span className="font-medium">JWT Access Token</span>
           </div>
           <ChevronRight className="h-4 w-4 text-amber-500" />
-          <div className="flex items-center gap-1 bg-white dark:bg-amber-900/30 px-3 py-2 rounded-lg border border-emerald-200">
+          <div className="flex items-center gap-1 bg-emerald-950/30 px-3 py-2 rounded-lg border border-emerald-800/50">
             <Bot className="h-3 w-3" /> <span className="font-medium">Agent Acts Autonomously</span>
           </div>
           <ChevronRight className="h-4 w-4 text-amber-500" />
-          <div className="flex items-center gap-1 bg-white dark:bg-amber-900/30 px-3 py-2 rounded-lg border border-emerald-200">
-            <CheckCircle2 className="h-3 w-3 text-emerald-600" /> <span className="font-medium">Every Step Signed (Ed25519)</span>
+          <div className="flex items-center gap-1 bg-emerald-950/30 px-3 py-2 rounded-lg border border-emerald-800/50">
+            <CheckCircle2 className="h-3 w-3 text-emerald-400" /> <span className="font-medium">Every Step Signed (Ed25519)</span>
           </div>
         </div>
       </div>
@@ -3047,15 +3047,15 @@ function AutonomousPurchaseView() {
               All actions will be authenticated via the @agent-auth/sdk.
             </p>
             <div className="grid grid-cols-3 gap-3 text-xs">
-              <div className="bg-white dark:bg-emerald-900/30 p-2 rounded border border-emerald-200">
+              <div className="bg-emerald-950/30 p-2 rounded border border-emerald-800/50">
                 <p className="text-muted-foreground">Delegation ID</p>
                 <p className="font-mono truncate">{delegationId.slice(0, 20)}...</p>
               </div>
-              <div className="bg-white dark:bg-emerald-900/30 p-2 rounded border border-emerald-200">
+              <div className="bg-emerald-950/30 p-2 rounded border border-emerald-800/50">
                 <p className="text-muted-foreground">T3 API Key</p>
                 <p className="font-mono text-emerald-600">Issued ✓</p>
               </div>
-              <div className="bg-white dark:bg-emerald-900/30 p-2 rounded border border-emerald-200">
+              <div className="bg-emerald-950/30 p-2 rounded border border-emerald-800/50">
                 <p className="text-muted-foreground">Signature</p>
                 <p className="font-mono text-emerald-600">Ed25519 ✓</p>
               </div>
@@ -3124,19 +3124,19 @@ function AutonomousPurchaseView() {
               </h3>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <div className="bg-white dark:bg-background p-3 rounded-lg border border-border text-center">
+                <div className="bg-background p-3 rounded-lg border border-border text-center">
                   <p className="text-2xl font-bold text-emerald-600">{autonomousResult.matchScore}%</p>
                   <p className="text-xs text-muted-foreground">Match Score</p>
                 </div>
-                <div className="bg-white dark:bg-background p-3 rounded-lg border border-border text-center">
+                <div className="bg-background p-3 rounded-lg border border-border text-center">
                   <p className="text-2xl font-bold text-amber-600">{autonomousResult.trustScore}%</p>
                   <p className="text-xs text-muted-foreground">Trust Score</p>
                 </div>
-                <div className="bg-white dark:bg-background p-3 rounded-lg border border-border text-center">
+                <div className="bg-background p-3 rounded-lg border border-border text-center">
                   <p className="text-lg font-bold">{autonomousResult.riskLevel}</p>
                   <p className="text-xs text-muted-foreground">Risk Level</p>
                 </div>
-                <div className="bg-white dark:bg-background p-3 rounded-lg border border-border text-center">
+                <div className="bg-background p-3 rounded-lg border border-border text-center">
                   <p className="text-2xl font-bold text-emerald-600">{autonomousResult.totalStepsCompleted}/7</p>
                   <p className="text-xs text-muted-foreground">Steps Done</p>
                 </div>
@@ -3152,7 +3152,7 @@ function AutonomousPurchaseView() {
                 ))}
               </div>
 
-              <div className="flex items-center gap-2 p-3 bg-white dark:bg-background rounded-lg border border-emerald-200">
+              <div className="flex items-center gap-2 p-3 bg-background rounded-lg border border-emerald-800/50">
                 <Lock className="h-4 w-4 text-emerald-600" />
                 <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
                   All actions signed with Ed25519Signature2020 and authenticated via Terminal 3 Agent Auth SDK

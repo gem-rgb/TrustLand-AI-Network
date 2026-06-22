@@ -168,28 +168,28 @@ function PropertyInfoWindow({
   onStartPurchase: () => void;
 }) {
   return (
-    <div className="font-sans w-56">
+    <div className="font-sans w-56 rounded-xl border border-white/10 bg-[#0c2350] p-3 text-white shadow-xl">
       <div className="flex items-start justify-between gap-2 mb-1">
-        <p className="text-sm font-semibold text-slate-900 leading-tight">{property.title}</p>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 -mt-1 -mr-1">
+        <p className="text-sm font-semibold text-white leading-tight">{property.title}</p>
+        <button onClick={onClose} className="text-white/60 hover:text-white -mt-1 -mr-1">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <p className="text-[11px] text-slate-500 mb-2">{property.address}, {property.city}, {property.country}</p>
+      <p className="text-[11px] text-white/60 mb-2">{property.address}, {property.city}, {property.country}</p>
 
       <div className="flex items-center justify-between mb-2">
-        <span className="text-base font-bold text-orange-600">KES {(property.askingPrice / 1_000_000).toFixed(2)}M</span>
+        <span className="text-base font-bold text-orange-300">KES {(property.askingPrice / 1_000_000).toFixed(2)}M</span>
         <Badge className={cn(
           'text-[10px] h-5',
-          property.trustScore >= 80 ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-          : property.trustScore >= 60 ? 'bg-amber-100 text-amber-700 border border-amber-300'
-          : 'bg-rose-100 text-rose-700 border border-rose-300'
+          property.trustScore >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+          : property.trustScore >= 60 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+          : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
         )}>
           <Shield className="h-2.5 w-2.5 mr-1" />{property.trustScore}%
         </Badge>
       </div>
 
-      <div className="flex items-center gap-3 text-[11px] text-slate-600 mb-3">
+      <div className="flex items-center gap-3 text-[11px] text-white/70 mb-3">
         {property.bedrooms != null && (
           <span className="flex items-center gap-1"><Bed className="h-3 w-3" />{property.bedrooms}</span>
         )}
@@ -201,7 +201,7 @@ function PropertyInfoWindow({
 
       <div className="flex flex-wrap gap-1 mb-3">
         {property.features.slice(0, 3).map(f => (
-          <span key={f} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">{f}</span>
+          <span key={f} className="text-[9px] px-1.5 py-0.5 rounded bg-white/10 text-white/80">{f}</span>
         ))}
       </div>
 
@@ -373,7 +373,7 @@ export default function GoogleMapsView({
               <input
                 type="text"
                 placeholder="Search neighborhoods, addresses, landmarks…"
-                className="w-full h-10 pl-10 pr-3 rounded-md bg-white text-slate-900 text-sm placeholder:text-slate-400 shadow-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full h-10 pl-10 pr-3 rounded-md bg-[#0c2350]/95 text-white text-sm placeholder:text-white/40 shadow-lg border border-white/15 focus:outline-none focus:ring-2 focus:ring-orange-500"
               />
             </div>
           </Autocomplete>
