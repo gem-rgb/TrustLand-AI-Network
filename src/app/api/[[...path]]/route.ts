@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { initializeData, data, getDashboardStats, getTrustScore, advanceWorkflow, uploadDocument, sendMessage, delegateAuthority, verifyLedger, createPropertyVerification, getPropertyVerifications, getPropertyVerification, generateDueDiligenceReport, getDueDiligenceReports, calculateTrustScore, getTrustProfile, getAllTrustProfiles, updateTrustScoreOnEvent, advanceTransactionStage, getTransactionEvents, getTransactionHistory, assignAgentToWorkflow, getAgentActivity, addAuditLedgerEntry, verifyAuditLedger, searchAuditLedger, exportAuditLedger, getAnalyticsMetrics, TRANSACTION_STAGES } from '@/lib/backend-data';
+import { deriveDashboardRole, filterProperties } from '@/lib/trustland-access';
 import { t3AutonomousPurchase } from '@/lib/t3-autonomous-purchase';
 import { generateEd25519KeyPair, generateT3Did, signEd25519, hashData } from '@/lib/t3-crypto';
 import { t3SDKClient } from '@/lib/t3-sdk-client';
@@ -437,9 +438,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // ── Identity Creation (with real T3 integration + real SDK) ──
 
       case 'identities': {
-        const { name, email, organization, credentialType = 'verified_user' } = body;
+        const { name, email, organization, credentialType = 'verified_user', kyc = {} } = body;
+        const {
+          nationalId,
+          phone,
+          country,
+          address,
+          dateOfBirth,
+        } = kyc as {
+          nationalId?: string;
+          phone?: string;
+          country?: string;
+          address?: string;
+          dateOfBirth?: string;
+        };
+
+        if (!nationalId || !phone || !country || !address || !dateOfBirth) {
+          return NextResponse.json({
+            error: 'KYC details are required to register a TrustLand identity',
+          }, { status: 400 });
+        }
+
         const keyPair = generateEd25519KeyPair();
         const did = generateT3Did(keyPair.publicKeyBase64);
+        const dashboardRole = deriveDashboardRole(credentialType);
+        const kycStatus = 'verified' as const;
 
         // Issue a Verifiable Credential with REAL Ed25519 signature (no more mock createHash)
         const vcProof = signEd25519(
@@ -458,7 +481,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           status: 'active',
           verifiedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
-          profile: { name, email, organization, role: credentialType },
+          profile: {
+            name,
+            email,
+            organization,
+            role: credentialType,
+            phone,
+            country,
+            address,
+            dateOfBirth,
+            nationalId,
+            kycStatus,
+            kycVerifiedAt: new Date().toISOString(),
+          },
           verifiableCredentialId: vc.id,
         };
         data.identities.push(identity as never);
@@ -473,7 +508,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           // Non-critical: SDK registration can fail gracefully
         }
 
-        result = { identity: { did, publicKey: keyPair.publicKeyBase64, credentialType, status: 'active', profile: identity.profile, t3Integrated: true, verifiableCredentialId: vc.id, t3SDKRegistered: true } };
+        result = {
+          identity: {
+            did,
+            publicKey: keyPair.publicKeyBase64,
+            credentialType,
+            status: 'active',
+            profile: identity.profile,
+            t3Integrated: true,
+            verifiableCredentialId: vc.id,
+            t3SDKRegistered: true,
+            dashboardRole,
+            kycStatus,
+          },
+        };
         break;
       }
 
@@ -496,14 +544,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
 
       case 'properties/search': {
-        const { city, propertyType, minPrice, maxPrice, bedrooms } = body;
-        let results = [...data.properties];
-        if (city) results = results.filter(p => p.city.toLowerCase().includes(city.toLowerCase()));
-        if (propertyType) results = results.filter(p => p.propertyType === propertyType);
-        if (minPrice) results = results.filter(p => p.askingPrice >= minPrice);
-        if (maxPrice) results = results.filter(p => p.askingPrice <= maxPrice);
-        if (bedrooms) results = results.filter(p => p.bedrooms === bedrooms);
-        result = results;
+        const { query, propertyType, propertyTypes, city, region, status, minPrice, maxPrice, bedrooms, features } = body;
+        result = filterProperties(data.properties, {
+          query: query || city || region,
+          propertyType,
+          propertyTypes,
+          city,
+          region,
+          status,
+          minPrice: typeof minPrice === 'number' ? minPrice : minPrice ? Number(minPrice) : undefined,
+          maxPrice: typeof maxPrice === 'number' ? maxPrice : maxPrice ? Number(maxPrice) : undefined,
+          bedrooms: typeof bedrooms === 'number' ? bedrooms : bedrooms ? Number(bedrooms) : undefined,
+          features: Array.isArray(features) ? features : undefined,
+        });
         break;
       }
 

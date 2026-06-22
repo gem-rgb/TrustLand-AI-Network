@@ -8,7 +8,7 @@ import React, { useState } from 'react';
 import {
   Shield, Lock, Key, Fingerprint, CheckCircle2, User, Mail, Building2,
   Sparkles, ArrowRight, Loader2, AlertCircle, LogIn, UserPlus,
-  BadgeCheck, Terminal, Eye, EyeOff, Copy, Check,
+  BadgeCheck, Terminal, Eye, EyeOff, Copy, Check, LogOut,
 } from 'lucide-react';
 import { useTrustLandStore } from '@/lib/store';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { deriveDashboardRole, getDashboardRoleLabel } from '@/lib/trustland-access';
 
 const CREDENTIAL_TYPES = [
   { value: 'buyer',       label: 'Property Buyer',     desc: 'Search, negotiate, sign, delegate', scopes: ['search:properties', 'negotiate:offers', 'sign:contracts', 'delegate:authority', 'autonomous:purchase'] },
@@ -32,7 +33,7 @@ const CREDENTIAL_TYPES = [
 type Mode = 'login' | 'register';
 
 export default function AuthView() {
-  const { identities, fetchIdentities, setCurrentView, setIsAuthenticated } = useTrustLandStore();
+  const { identities, fetchIdentities, setCurrentView, setAuthSession, logout } = useTrustLandStore();
   const [mode, setMode] = useState<Mode>('register');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +44,11 @@ export default function AuthView() {
   const [organization, setOrganization] = useState('');
   const [credentialType, setCredentialType] = useState('buyer');
   const [agree, setAgree] = useState(false);
+  const [nationalId, setNationalId] = useState('');
+  const [phone, setPhone] = useState('');
+  const [country, setCountry] = useState('Kenya');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [address, setAddress] = useState('');
 
   // Login form state
   const [loginDid, setLoginDid] = useState('');
@@ -66,6 +72,10 @@ export default function AuthView() {
       setError('Please enter a valid email address');
       return;
     }
+    if (!nationalId.trim() || !phone.trim() || !country.trim() || !dateOfBirth.trim() || !address.trim()) {
+      setError('Complete the KYC fields before submitting your identity request');
+      return;
+    }
     if (!agree) {
       setError('You must agree to the TrustLand Terms and Privacy Policy');
       return;
@@ -81,6 +91,13 @@ export default function AuthView() {
           email: email.trim(),
           organization: organization.trim() || undefined,
           credentialType,
+          kyc: {
+            nationalId: nationalId.trim(),
+            phone: phone.trim(),
+            country: country.trim(),
+            dateOfBirth,
+            address: address.trim(),
+          },
         }),
       });
       if (!res.ok) {
@@ -90,9 +107,17 @@ export default function AuthView() {
       const data = await res.json();
       await fetchIdentities();
       setIssuedIdentity(data.identity);
-      setIsAuthenticated(true);
-      setCurrentView('auth');
-      toast.success('Identity verified & T3 credential issued');
+      const dashboardRole = deriveDashboardRole(data.identity?.dashboardRole || credentialType);
+      setAuthSession({
+        authenticated: true,
+        currentView: 'dashboard',
+        dashboardRole,
+        identityDid: data.identity?.did,
+        displayName: data.identity?.profile?.name || name.trim(),
+        kycStatus: 'verified',
+      });
+      setCurrentView('dashboard');
+      toast.success(`${getDashboardRoleLabel(dashboardRole)} unlocked`);
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
@@ -119,9 +144,20 @@ export default function AuthView() {
       if (!found) {
         throw new Error('No TrustLand identity matches that DID or email');
       }
+      if (found.profile.kycStatus !== 'verified') {
+        throw new Error('This identity has not completed KYC verification yet');
+      }
       setIssuedIdentity(found);
-      setIsAuthenticated(true);
-      setCurrentView('auth');
+      const dashboardRole = deriveDashboardRole(found.profile.role || found.credentialType);
+      setAuthSession({
+        authenticated: true,
+        currentView: 'dashboard',
+        dashboardRole,
+        identityDid: found.did,
+        displayName: found.profile.name,
+        kycStatus: found.profile.kycStatus || 'verified',
+      });
+      setCurrentView('dashboard');
       toast.success(`Welcome back, ${found.profile.name}`);
     } catch (err: any) {
       setError(err.message || 'Login failed');
@@ -136,6 +172,32 @@ export default function AuthView() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
+  };
+
+  const resetAuthForm = () => {
+    setIssuedIdentity(null);
+    setLoading(false);
+    setError(null);
+    setMode('register');
+    setName('');
+    setEmail('');
+    setOrganization('');
+    setCredentialType('buyer');
+    setAgree(false);
+    setNationalId('');
+    setPhone('');
+    setCountry('Kenya');
+    setDateOfBirth('');
+    setAddress('');
+    setLoginDid('');
+    setShowDid(false);
+    setCopied(false);
+  };
+
+  const handleSignOut = () => {
+    resetAuthForm();
+    logout();
+    setCurrentView('auth');
   };
 
   // ─── Success state ─────────────────────────────────────────────────────
@@ -239,8 +301,17 @@ export default function AuthView() {
             </Button>
           </div>
 
+          <Button
+            variant="ghost"
+            className="w-full mt-3 text-white/60 hover:bg-white/10 hover:text-white"
+            onClick={handleSignOut}
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign Out
+          </Button>
+
           <button
-            onClick={() => { setIssuedIdentity(null); setMode('register'); }}
+            onClick={resetAuthForm}
             className="block mx-auto mt-4 text-xs text-white/50 hover:text-white underline"
           >
             Register another identity
@@ -339,6 +410,60 @@ export default function AuthView() {
                   onChange={(e) => setOrganization(e.target.value)}
                   placeholder="e.g. HassConsult Real Estate"
                   className="pl-10 bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:bg-white/10"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-white/70">KYC / Identity Verification</Label>
+                <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px]">Required</Badge>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-[11px] text-white/60 mb-1 block">National ID / Passport *</Label>
+                  <Input
+                    value={nationalId}
+                    onChange={(e) => setNationalId(e.target.value)}
+                    placeholder="ID / Passport number"
+                    className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:bg-white/10"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] text-white/60 mb-1 block">Phone Number *</Label>
+                  <Input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+2547..."
+                    className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:bg-white/10"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] text-white/60 mb-1 block">Country *</Label>
+                  <Input
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    placeholder="Kenya"
+                    className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:bg-white/10"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] text-white/60 mb-1 block">Date of Birth *</Label>
+                  <Input
+                    type="date"
+                    value={dateOfBirth}
+                    onChange={(e) => setDateOfBirth(e.target.value)}
+                    className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:bg-white/10"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-[11px] text-white/60 mb-1 block">Residential Address *</Label>
+                <Input
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Street, city, region"
+                  className="bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:bg-white/10"
                 />
               </div>
             </div>
@@ -455,7 +580,12 @@ export default function AuthView() {
                         <p className="text-sm font-medium truncate">{id.profile.name}</p>
                         <p className="text-[10px] text-white/50 truncate">{id.profile.email}</p>
                       </div>
-                      <Badge className="text-[9px] bg-white/10 border-0">{id.credentialType}</Badge>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge className="text-[9px] bg-white/10 border-0">{id.profile.role || id.credentialType}</Badge>
+                        <Badge className="text-[9px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+                          {id.profile.kycStatus || 'pending'}
+                        </Badge>
+                      </div>
                     </button>
                   ))}
                 </div>

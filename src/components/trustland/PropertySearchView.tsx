@@ -13,12 +13,14 @@ import {
   SlidersHorizontal, Layers, Locate, Compass, Calendar,
   Bed, Bath, Car, TreePine, Wrench, DollarSign, Tag,
   TrendingUp, Sparkles, ArrowRight, Shield, ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { useTrustLandStore, type Property } from '@/lib/store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { canAccessView, filterProperties, matchesPropertyStatus, matchesPropertyType } from '@/lib/trustland-access';
 import ParcelSearchPalette from './ParcelSearchPalette';
 import GoogleMapsView from './GoogleMapsView';
 
@@ -82,9 +84,30 @@ const FILTER_GROUPS = [
 type FilterKey = typeof FILTER_GROUPS[number]['key'];
 
 // ─── Property card on the right rail (compact category tiles like the demo) ─
-function CategoryCard({ label, count, icon: Icon, accent }: { label: string; count: number; icon: any; accent: string }) {
+function CategoryCard({
+  label,
+  count,
+  icon: Icon,
+  accent,
+  active = false,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  icon: any;
+  accent: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <div className="rounded-xl bg-white/5 border border-white/10 p-3 hover:bg-white/10 transition cursor-pointer">
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-xl border p-3 text-left transition cursor-pointer',
+        active ? 'bg-orange-500/20 border-orange-500/40 ring-1 ring-orange-500/30' : 'bg-white/5 border-white/10 hover:bg-white/10'
+      )}
+    >
       <div className="flex items-center justify-between mb-2">
         <div className={cn('h-8 w-8 rounded-lg flex items-center justify-center', accent)}>
           <Icon className="h-4 w-4 text-white" />
@@ -92,7 +115,7 @@ function CategoryCard({ label, count, icon: Icon, accent }: { label: string; cou
         <span className="text-lg font-bold text-white">{count}</span>
       </div>
       <p className="text-xs text-white/70">{label}</p>
-    </div>
+    </button>
   );
 }
 
@@ -123,7 +146,7 @@ function _PropertyPin({ property, onClick, isSelected }: { property: Property; o
 
 // ─── Main View ──────────────────────────────────────────────────────────────
 export default function PropertySearchView() {
-  const { properties, setCurrentView, fetchProperties } = useTrustLandStore();
+  const { properties, setCurrentView, fetchProperties, dashboardRole } = useTrustLandStore();
   const [query, setQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<FilterKey, string[]>>({
     status: [], price: [], type: [], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [],
@@ -131,6 +154,8 @@ export default function PropertySearchView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(true);
   const [searchPaletteOpen, setSearchPaletteOpen] = useState(false);
+  const [searchResults, setSearchResults] = useState<Property[] | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Pull properties on mount if empty
   React.useEffect(() => {
@@ -138,15 +163,17 @@ export default function PropertySearchView() {
   }, [properties.length, fetchProperties]);
 
   // Filter properties based on search query + active filters
-  const filtered = useMemo(() => {
+  const localFiltered = useMemo(() => {
     return properties.filter((p) => {
       if (query) {
         const q = query.toLowerCase();
         const hay = `${p.title} ${p.address} ${p.city} ${p.region} ${p.country} ${p.propertyType}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (activeFilters.type.length && !activeFilters.type.some(t => p.propertyType.toLowerCase().includes(t.toLowerCase()))) return false;
-      if (activeFilters.status.length && !activeFilters.status.some(s => p.status.toLowerCase().includes(s.toLowerCase().replace(' ', '-')))) return false;
+      const isVisibleListing = matchesPropertyStatus(p.status, 'For Sale') || matchesPropertyStatus(p.status, 'For Rent');
+      if (!activeFilters.status.length && !isVisibleListing) return false;
+      if (activeFilters.type.length && !activeFilters.type.some(t => matchesPropertyType(p.propertyType, t))) return false;
+      if (activeFilters.status.length && !activeFilters.status.some(s => matchesPropertyStatus(p.status, s))) return false;
       if (activeFilters.rooms.length) {
         const beds = p.bedrooms ?? 0;
         const wants = activeFilters.rooms.map(r => r === '4+' ? 4 : parseInt(r));
@@ -173,9 +200,57 @@ export default function PropertySearchView() {
     });
   }, [properties, query, activeFilters]);
 
-  const featuredCount   = filtered.filter(p => p.trustScore >= 80).length;
-  const newestCount     = filtered.filter(p => Date.now() - new Date(p.createdAt).getTime() < 30 * 24 * 3600 * 1000).length;
-  const byType = (t: string) => filtered.filter(p => p.propertyType.toLowerCase().includes(t.toLowerCase())).length;
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      setSearchLoading(true);
+      try {
+        const res = await fetch('/api/properties/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: query.trim() || undefined,
+            propertyTypes: activeFilters.type.length ? activeFilters.type : undefined,
+            status: activeFilters.status[0] || undefined,
+            minPrice: activeFilters.price[0] === '< 5M' ? 0 : activeFilters.price[0] === '5M–20M' ? 5_000_000 : activeFilters.price[0] === '20M–50M' ? 20_000_000 : activeFilters.price[0] === '> 50M' ? 50_000_000 : undefined,
+            maxPrice: activeFilters.price[0] === '< 5M' ? 5_000_000 : activeFilters.price[0] === '5M–20M' ? 20_000_000 : activeFilters.price[0] === '20M–50M' ? 50_000_000 : undefined,
+            bedrooms: activeFilters.rooms.length
+              ? Math.min(...activeFilters.rooms.map((room) => {
+                  if (room === '4+') return 4;
+                  const parsed = parseInt(room, 10);
+                  return Number.isFinite(parsed) ? parsed : 0;
+                }).filter((count) => count > 0))
+              : undefined,
+            features: activeFilters.feat.length ? activeFilters.feat : undefined,
+          }),
+        });
+        if (!res.ok) throw new Error('search failed');
+        const data = await res.json();
+        if (!cancelled) {
+          setSearchResults(Array.isArray(data) ? data : (data.results || []));
+        }
+      } catch {
+        if (!cancelled) {
+          setSearchResults(localFiltered);
+        }
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    };
+
+    setSearchResults(localFiltered);
+    const timer = setTimeout(run, 220);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, activeFilters.type, activeFilters.status, activeFilters.rooms, activeFilters.feat, activeFilters.price, localFiltered]);
+
+  const filtered = searchResults ?? localFiltered;
+  const featuredCount = filtered.filter(p => p.trustScore >= 80).length;
+  const newestCount = filtered.filter(p => Date.now() - new Date(p.createdAt).getTime() < 30 * 24 * 3600 * 1000).length;
+  const byType = (t: string) => properties.filter(p => (matchesPropertyStatus(p.status, 'For Sale') || matchesPropertyStatus(p.status, 'For Rent')) && matchesPropertyType(p.propertyType, t)).length;
 
   const toggleFilter = (group: FilterKey, value: string) => {
     setActiveFilters(prev => {
@@ -187,10 +262,16 @@ export default function PropertySearchView() {
   const clearAll = () => {
     setActiveFilters({ status: [], price: [], type: [], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [] });
     setQuery('');
+    setSelectedId(null);
   };
 
   const totalActive = Object.values(activeFilters).flat().length;
   const selected = filtered.find(p => p.id === selectedId) || null;
+  const primaryAction = dashboardRole === 'buyer'
+    ? { label: 'Open Buyer Tools', view: 'autonomous-purchase' as const }
+    : dashboardRole === 'seller'
+      ? { label: 'Open Seller Dashboard', view: 'dashboard' as const }
+      : { label: 'Open Admin Dashboard', view: 'dashboard' as const };
 
   return (
     <div className="min-h-screen bg-[#0a1f44] text-white flex flex-col">
@@ -213,7 +294,7 @@ export default function PropertySearchView() {
           >
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50 group-hover:text-orange-400 transition" />
             <div className="h-10 pl-10 pr-20 flex items-center bg-white/5 border border-white/15 rounded-md text-white/40 group-hover:bg-white/10 group-hover:border-orange-500/40 transition">
-              <span className="text-sm">Search land parcels, neighborhoods, or addresses across Nairobi…</span>
+              <span className="text-sm">Search parcels, neighborhoods, properties, or features across the network…</span>
               <span className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 rounded bg-white/10 border border-white/15 text-white/60">⌘K</kbd>
                 <Badge className="bg-orange-500 text-white text-[10px] h-5 px-2 ml-1">Search</Badge>
@@ -228,6 +309,20 @@ export default function PropertySearchView() {
             onSelect={(p) => {
               setSelectedId(p.id);
               setQuery(p.title);
+              setActiveFilters(prev => ({
+                ...prev,
+                type: matchesPropertyType(p.propertyType, 'apartment')
+                  ? ['Apartment']
+                  : matchesPropertyType(p.propertyType, 'house')
+                    ? ['House']
+                    : matchesPropertyType(p.propertyType, 'land')
+                      ? ['Land']
+                      : matchesPropertyType(p.propertyType, 'commercial')
+                        ? ['Commercial']
+                        : matchesPropertyType(p.propertyType, 'estate')
+                          ? ['Estate']
+                          : prev.type,
+              }));
             }}
           />
 
@@ -247,11 +342,11 @@ export default function PropertySearchView() {
             </Button>
             <Button
               size="sm"
-              onClick={() => setCurrentView('autonomous-purchase')}
+              onClick={() => setCurrentView(primaryAction.view)}
               className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white border-0"
             >
               <Sparkles className="h-4 w-4 mr-2" />
-              AI Agent
+              {primaryAction.label}
             </Button>
           </div>
         </div>
@@ -344,10 +439,10 @@ export default function PropertySearchView() {
               <Button
                 size="sm"
                 className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 border-0 text-white"
-                onClick={() => setCurrentView('dashboard')}
+                onClick={() => setCurrentView(primaryAction.view)}
               >
                 <Sparkles className="h-3.5 w-3.5 mr-2" />
-                View Dashboard
+                {primaryAction.label}
               </Button>
             </div>
           </aside>
@@ -381,6 +476,7 @@ export default function PropertySearchView() {
             <div className="flex items-baseline gap-2">
               <span className="text-4xl font-bold">{filtered.length}</span>
               <span className="text-xs text-white/60">properties found</span>
+              {searchLoading && <Loader2 className="h-4 w-4 animate-spin text-orange-300" />}
             </div>
             <div className="grid grid-cols-2 gap-2 mt-3">
               <div className="rounded-lg bg-white/5 p-2 border border-white/10">
@@ -398,20 +494,61 @@ export default function PropertySearchView() {
             <h3 className="text-sm font-semibold mb-1">Explore Properties</h3>
             <p className="text-[11px] text-white/50 mb-3">Browse by category across the TrustLand network</p>
             <div className="grid grid-cols-2 gap-2">
-              <CategoryCard label="Apartments"  count={byType('apartment')}  icon={Building2} accent="bg-blue-500" />
-              <CategoryCard label="Houses"      count={byType('house')}      icon={Home}      accent="bg-amber-500" />
-              <CategoryCard label="Estates"     count={byType('estate')}     icon={Hotel}     accent="bg-violet-500" />
-              <CategoryCard label="Land Plots"  count={byType('land')}       icon={LandPlot}  accent="bg-emerald-500" />
-              <CategoryCard label="Featured"    count={featuredCount}        icon={Star}      accent="bg-orange-500" />
-              <CategoryCard label="Commercial"  count={byType('commercial')} icon={Building2} accent="bg-rose-500" />
+              <CategoryCard
+                label="Apartments"
+                count={byType('apartment')}
+                icon={Building2}
+                accent="bg-blue-500"
+                active={activeFilters.type.some(t => matchesPropertyType('apartment', t))}
+                onClick={() => { setActiveFilters({ status: [], price: [], type: ['Apartment'], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [] }); setQuery(''); setSelectedId(null); }}
+              />
+              <CategoryCard
+                label="Houses"
+                count={byType('house')}
+                icon={Home}
+                accent="bg-amber-500"
+                active={activeFilters.type.some(t => matchesPropertyType('house', t))}
+                onClick={() => { setActiveFilters({ status: [], price: [], type: ['House'], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [] }); setQuery(''); setSelectedId(null); }}
+              />
+              <CategoryCard
+                label="Estates"
+                count={byType('estate')}
+                icon={Hotel}
+                accent="bg-violet-500"
+                active={activeFilters.type.some(t => matchesPropertyType('estate', t))}
+                onClick={() => { setActiveFilters({ status: [], price: [], type: ['Estate'], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [] }); setQuery(''); setSelectedId(null); }}
+              />
+              <CategoryCard
+                label="Land Plots"
+                count={byType('land')}
+                icon={LandPlot}
+                accent="bg-emerald-500"
+                active={activeFilters.type.some(t => matchesPropertyType('land', t))}
+                onClick={() => { setActiveFilters({ status: [], price: [], type: ['Land'], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [] }); setQuery(''); setSelectedId(null); }}
+              />
+              <CategoryCard
+                label="Featured"
+                count={featuredCount}
+                icon={Star}
+                accent="bg-orange-500"
+                onClick={() => { setActiveFilters({ status: [], price: [], type: [], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [] }); setSelectedId(null); }}
+              />
+              <CategoryCard
+                label="Commercial"
+                count={byType('commercial')}
+                icon={Building2}
+                accent="bg-rose-500"
+                active={activeFilters.type.some(t => matchesPropertyType('commercial', t))}
+                onClick={() => { setActiveFilters({ status: [], price: [], type: ['Commercial'], rooms: [], baths: [], garage: [], garden: [], cond: [], feat: [] }); setQuery(''); setSelectedId(null); }}
+              />
             </div>
 
             <Button
               className="w-full mt-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 border-0 text-white"
-              onClick={() => setCurrentView('autonomous-purchase')}
+              onClick={() => setCurrentView(primaryAction.view)}
             >
               <Sparkles className="h-4 w-4 mr-2" />
-              Launch AI Agent Search
+              {primaryAction.label}
             </Button>
           </div>
 
@@ -424,7 +561,7 @@ export default function PropertySearchView() {
               <h4 className="text-sm font-semibold text-white mb-1">{selected.title}</h4>
               <p className="text-[11px] text-white/60 mb-2">{selected.address}, {selected.city}</p>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-lg font-bold text-orange-400">KES {(selected.askingPrice / 1_000_000).toFixed(2)}M</span>
+                <span className="text-lg font-bold text-orange-400">{selected.currency} {(selected.askingPrice / 1_000_000).toFixed(2)}M</span>
                 <span className="text-[10px] text-white/50">{selected.propertyType}</span>
               </div>
               <div className="flex items-center gap-3 text-[11px] text-white/70 mb-3">
@@ -436,9 +573,9 @@ export default function PropertySearchView() {
                 size="sm"
                 variant="outline"
                 className="w-full bg-white/5 border-white/20 text-white hover:bg-white/10"
-                onClick={() => setCurrentView('autonomous-purchase')}
+                onClick={() => setCurrentView(primaryAction.view)}
               >
-                Start Autonomous Purchase
+                {primaryAction.label}
                 <ArrowRight className="h-3 w-3 ml-1" />
               </Button>
             </div>
@@ -453,18 +590,12 @@ export default function PropertySearchView() {
           <div className="mt-auto p-4 border-t border-white/10">
             <p className="text-[10px] uppercase tracking-widest text-white/40 mb-2">TrustLand Network</p>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <button onClick={() => setCurrentView('agents')} className="flex items-center gap-1 text-white/70 hover:text-white">
-                <ChevronRight className="h-3 w-3" />Agents
-              </button>
-              <button onClick={() => setCurrentView('ledger')} className="flex items-center gap-1 text-white/70 hover:text-white">
-                <ChevronRight className="h-3 w-3" />Trust Ledger
-              </button>
-              <button onClick={() => setCurrentView('transactions')} className="flex items-center gap-1 text-white/70 hover:text-white">
-                <ChevronRight className="h-3 w-3" />Transactions
-              </button>
-              <button onClick={() => setCurrentView('diligence')} className="flex items-center gap-1 text-white/70 hover:text-white">
-                <ChevronRight className="h-3 w-3" />Due Diligence
-              </button>
+              {canAccessView(dashboardRole, 'agents') && <button onClick={() => setCurrentView('agents')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Agents</button>}
+              {canAccessView(dashboardRole, 'ledger') && <button onClick={() => setCurrentView('ledger')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Trust Ledger</button>}
+              {canAccessView(dashboardRole, 'transactions') && <button onClick={() => setCurrentView('transactions')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Transactions</button>}
+              {canAccessView(dashboardRole, 'diligence') && <button onClick={() => setCurrentView('diligence')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Due Diligence</button>}
+              {canAccessView(dashboardRole, 'autonomous-purchase') && <button onClick={() => setCurrentView('autonomous-purchase')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Autonomous Purchase</button>}
+              {canAccessView(dashboardRole, 'messages') && <button onClick={() => setCurrentView('messages')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Messages</button>}
             </div>
           </div>
         </aside>
@@ -484,14 +615,16 @@ export default function PropertySearchView() {
               onClick={() => setCurrentView('dashboard')}
               className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"
             >
-              <Compass className="h-3.5 w-3.5" /> Dashboard
+              <Compass className="h-3.5 w-3.5" /> {dashboardRole === 'buyer' ? 'Buyer Dashboard' : dashboardRole === 'seller' ? 'Seller Dashboard' : 'Admin Dashboard'}
             </button>
-            <button
-              onClick={() => setCurrentView('autonomous-purchase')}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"
-            >
-              <Sparkles className="h-3.5 w-3.5" /> AI Agent
-            </button>
+            {canAccessView(dashboardRole, 'autonomous-purchase') && (
+              <button
+                onClick={() => setCurrentView('autonomous-purchase')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Autonomous Purchase
+              </button>
+            )}
             <button
               onClick={() => setCurrentView('transactions')}
               className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"

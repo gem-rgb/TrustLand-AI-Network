@@ -25,7 +25,19 @@ export interface T3Identity {
   status: string;
   verifiedAt: string | null;
   createdAt: string;
-  profile: { name: string; email: string; organization?: string; role?: string };
+  profile: {
+    name: string;
+    email: string;
+    organization?: string;
+    role?: string;
+    phone?: string;
+    country?: string;
+    address?: string;
+    dateOfBirth?: string;
+    nationalId?: string;
+    kycStatus?: 'unverified' | 'pending' | 'verified' | 'rejected';
+    kycVerifiedAt?: string;
+  };
   // ── T3 Integration Fields ──
   t3ApiKey?: string;             // Agent Auth API key (for agents)
   t3AccessToken?: string;        // Current JWT access token
@@ -550,7 +562,14 @@ export function initializeData() {
       status: 'active',
       verifiedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
-      profile: { name: inst.name, email: inst.email, organization: inst.org, role: inst.role },
+      profile: {
+        name: inst.name,
+        email: inst.email,
+        organization: inst.org,
+        role: inst.role,
+        kycStatus: 'verified',
+        kycVerifiedAt: new Date().toISOString(),
+      },
       verifiableCredentialId: vc.id,
     };
     data.identities.push(identity);
@@ -633,23 +652,28 @@ export function initializeData() {
   // Create properties
   const sellerIdentity = data.identities.find(i => i.profile.role === 'seller')!;
   const propDefs = [
-    { title: 'Sunset Villa', address: '123 Ocean Drive', city: 'Miami', region: 'FL', propertyType: 'residential', area: 3200, bedrooms: 4, bathrooms: 3, yearBuilt: 2019, askingPrice: 1250000, description: 'Stunning waterfront villa with panoramic ocean views', features: ['Ocean View', 'Pool', 'Smart Home', '3-Car Garage'], lat: 25.7617, lng: -80.1918, trustScore: 88.5, titleDeedRef: 'TD-2024-FL-001247', registryRef: 'REG-MIA-2019-45892' },
+    { title: 'Sunset Villa', address: '123 Ocean Drive', city: 'Miami', region: 'FL', propertyType: 'house', area: 3200, bedrooms: 4, bathrooms: 3, yearBuilt: 2019, askingPrice: 1250000, description: 'Stunning waterfront villa with panoramic ocean views', features: ['Ocean View', 'Pool', 'Smart Home', '3-Car Garage'], lat: 25.7617, lng: -80.1918, trustScore: 88.5, titleDeedRef: 'TD-2024-FL-001247', registryRef: 'REG-MIA-2019-45892' },
     { title: 'Metro Tower Office Suite', address: '456 Business Blvd', city: 'New York', region: 'NY', propertyType: 'commercial', area: 5500, bedrooms: null, bathrooms: null, yearBuilt: 2021, askingPrice: 2800000, description: 'Premium Class A office space in downtown Manhattan', features: ['City Views', 'Conference Rooms', '24/7 Security', 'Parking'], lat: 40.7128, lng: -74.006, trustScore: 94.2, titleDeedRef: 'TD-2023-NY-008934', registryRef: 'REG-NYC-2021-78234' },
     { title: 'Green Meadow Farm', address: '789 Rural Road', city: 'Austin', region: 'TX', propertyType: 'agricultural', area: 45000, bedrooms: 5, bathrooms: 2, yearBuilt: 2005, askingPrice: 890000, description: 'Working farm with modern facilities and irrigation system', features: ['Irrigation', 'Barn', 'Livestock Area', 'Solar Panels'], lat: 30.2672, lng: -97.7431, trustScore: 82.1, titleDeedRef: 'TD-2022-TX-005612', registryRef: 'REG-AUS-2005-32145' },
-    { title: 'Harbor Loft', address: '321 Pier Street', city: 'San Francisco', region: 'CA', propertyType: 'residential', area: 1800, bedrooms: 2, bathrooms: 2, yearBuilt: 2018, askingPrice: 975000, description: 'Modern loft with bay bridge views in the heart of the city', features: ['Bay Views', 'Rooftop Access', 'Gym', 'Concierge'], lat: 37.7749, lng: -122.4194, trustScore: 91.8, titleDeedRef: 'TD-2024-CA-003456', registryRef: 'REG-SFO-2018-56789' },
-    { title: 'Industrial Warehouse Complex', address: '567 Logistics Lane', city: 'Chicago', region: 'IL', propertyType: 'industrial', area: 25000, bedrooms: null, bathrooms: null, yearBuilt: 2015, askingPrice: 1500000, description: 'State-of-the-art warehouse with cold storage and loading docks', features: ['Cold Storage', 'Loading Docks', 'Security System', 'Rail Access'], lat: 41.8781, lng: -87.6298, trustScore: 86.3, titleDeedRef: 'TD-2021-IL-002789', registryRef: 'REG-CHI-2015-43216' },
-    { title: 'Maple Heights Residence', address: '890 Maple Ave', city: 'Seattle', region: 'WA', propertyType: 'residential', area: 2400, bedrooms: 3, bathrooms: 2.5, yearBuilt: 2020, askingPrice: 685000, description: 'Contemporary home in quiet neighborhood near top schools', features: ['Garden', 'Home Office', 'EV Charger', 'Smart Thermostat'], lat: 47.6062, lng: -122.3321, trustScore: 93.7, titleDeedRef: 'TD-2023-WA-006543', registryRef: 'REG-SEA-2020-65432' },
+    { title: 'Harbor Loft', address: '321 Pier Street', city: 'San Francisco', region: 'CA', propertyType: 'apartment', area: 1800, bedrooms: 2, bathrooms: 2, yearBuilt: 2018, askingPrice: 975000, description: 'Modern loft with bay bridge views in the heart of the city', features: ['Bay Views', 'Rooftop Access', 'Gym', 'Concierge'], lat: 37.7749, lng: -122.4194, trustScore: 91.8, titleDeedRef: 'TD-2024-CA-003456', registryRef: 'REG-SFO-2018-56789' },
+    { title: 'Industrial Warehouse Complex', address: '567 Logistics Lane', city: 'Chicago', region: 'IL', propertyType: 'commercial', area: 25000, bedrooms: null, bathrooms: null, yearBuilt: 2015, askingPrice: 1500000, description: 'State-of-the-art warehouse with cold storage and loading docks', features: ['Cold Storage', 'Loading Docks', 'Security System', 'Rail Access'], lat: 41.8781, lng: -87.6298, trustScore: 86.3, titleDeedRef: 'TD-2021-IL-002789', registryRef: 'REG-CHI-2015-43216' },
+    { title: 'Maple Heights Residence', address: '890 Maple Ave', city: 'Seattle', region: 'WA', propertyType: 'house', area: 2400, bedrooms: 3, bathrooms: 2.5, yearBuilt: 2020, askingPrice: 685000, description: 'Contemporary home in quiet neighborhood near top schools', features: ['Garden', 'Home Office', 'EV Charger', 'Smart Thermostat'], lat: 47.6062, lng: -122.3321, trustScore: 93.7, titleDeedRef: 'TD-2023-WA-006543', registryRef: 'REG-SEA-2020-65432' },
+    { title: 'Westlands Sky Residences', address: '18 Westlands Road', city: 'Nairobi', region: 'Westlands', propertyType: 'apartment', area: 1450, bedrooms: 3, bathrooms: 2, yearBuilt: 2022, askingPrice: 18500000, description: 'Serviced apartment tower with city views and concierge', features: ['Elevator', 'Gym', '24/7 Security', 'Parking'], lat: -1.2676, lng: 36.8108, trustScore: 96.4, titleDeedRef: 'TD-2024-KE-010001', registryRef: 'REG-NAI-2022-77881' },
+    { title: 'Kilimani Crest Apartments', address: '42 Argwings Kodhek Rd', city: 'Nairobi', region: 'Kilimani', propertyType: 'apartment', area: 1320, bedrooms: 2, bathrooms: 2, yearBuilt: 2021, askingPrice: 14200000, description: 'Modern apartment block near shopping and dining', features: ['Pool', 'Gym', 'Backup Generator', 'Security'], lat: -1.2904, lng: 36.7822, trustScore: 94.8, titleDeedRef: 'TD-2024-KE-010002', registryRef: 'REG-NAI-2021-77882' },
+    { title: 'Karen Grove Family House', address: '7 Karen Road', city: 'Nairobi', region: 'Karen', propertyType: 'house', area: 4200, bedrooms: 5, bathrooms: 4, yearBuilt: 2020, askingPrice: 36500000, description: 'Gated family home with mature garden and staff quarters', features: ['Garden', 'Security', 'Solar', 'Double Garage'], lat: -1.3197, lng: 36.7076, trustScore: 97.1, titleDeedRef: 'TD-2024-KE-010003', registryRef: 'REG-NAI-2020-77883' },
+    { title: 'Lavington Park House', address: '11 James Gichuru Rd', city: 'Nairobi', region: 'Lavington', propertyType: 'house', area: 3600, bedrooms: 4, bathrooms: 3.5, yearBuilt: 2019, askingPrice: 28900000, description: 'Contemporary townhouse in a quiet leafy enclave', features: ['Garden', 'Home Office', 'Parking', 'Security'], lat: -1.2800, lng: 36.7700, trustScore: 95.5, titleDeedRef: 'TD-2024-KE-010004', registryRef: 'REG-NAI-2019-77884' },
     // Add properties near Nakuru for the Autonomous Purchase demo
     { title: 'Nakuru Highlands Farm', address: '12 Nakuru-Eldoret Hwy', city: 'Nakuru', region: 'Rift Valley', propertyType: 'agricultural', area: 12000, bedrooms: 3, bathrooms: 1, yearBuilt: 2012, askingPrice: 45000, description: 'Fertile agricultural land near Lake Nakuru with irrigation potential', features: ['Irrigation', 'Borehole', 'Fertile Soil', 'Road Access'], lat: -0.3031, lng: 36.0800, trustScore: 85.2, titleDeedRef: 'TD-2024-RV-000892', registryRef: 'REG-NAK-2012-1847' },
     { title: 'Menengai Plot', address: '45 Menengai Road', city: 'Nakuru', region: 'Rift Valley', propertyType: 'agricultural', area: 8000, bedrooms: 2, bathrooms: 1, yearBuilt: 2018, askingPrice: 32000, description: 'Smallholding with volcanic soil ideal for horticulture', features: ['Volcanic Soil', 'Greenhouse Ready', 'Electricity', 'Fenced'], lat: -0.2150, lng: 36.0730, trustScore: 78.9, titleDeedRef: 'TD-2023-RV-001567', registryRef: 'REG-NAK-2018-2956' },
   ];
 
   propDefs.forEach(def => {
+    const isKenyanMarket = def.city === 'Nairobi' || def.city === 'Nakuru';
     const prop: Property = {
       id: crypto.randomUUID(),
       ...def,
-      country: def.city === 'Nakuru' ? 'KE' : 'US',
-      currency: def.city === 'Nakuru' ? 'USD' : 'USD',
+      country: isKenyanMarket ? 'KE' : 'US',
+      currency: isKenyanMarket ? 'KES' : 'USD',
       ownerDid: sellerIdentity.did,
       verificationStatus: 'verified',
       status: 'available',

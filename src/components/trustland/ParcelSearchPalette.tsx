@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { filterProperties } from '@/lib/trustland-access';
 
 const PROPERTY_TYPES = [
   { value: '', label: 'All Types' },
@@ -80,11 +81,7 @@ export default function ParcelSearchPalette({
       try {
         const range = PRICE_RANGES.find(r => r.value === priceRange);
         const body: Record<string, any> = {};
-        if (query.trim()) {
-          // Search by neighborhood/address keyword — backend matches city field
-          const cityMatch = query.trim();
-          body.city = cityMatch;
-        }
+        if (query.trim()) body.query = query.trim();
         if (propertyType) body.propertyType = propertyType;
         if (range) { body.minPrice = range.min; body.maxPrice = range.max; }
         if (bedrooms) body.bedrooms = parseInt(bedrooms);
@@ -96,39 +93,17 @@ export default function ParcelSearchPalette({
         });
         if (!res.ok) throw new Error('search failed');
         const data = await res.json();
-        if (!cancelled) {
-          // Further filter by text query (title, address) since backend only filters city
-          let filtered = Array.isArray(data) ? data : (data.results || []);
-          if (query.trim()) {
-            const q = query.toLowerCase();
-            filtered = filtered.filter((p: Property) =>
-              p.title.toLowerCase().includes(q) ||
-              p.address.toLowerCase().includes(q) ||
-              p.city.toLowerCase().includes(q) ||
-              p.region.toLowerCase().includes(q) ||
-              p.propertyType.toLowerCase().includes(q) ||
-              p.features.some(f => f.toLowerCase().includes(q))
-            );
-          }
-          setResults(filtered);
-        }
+        if (!cancelled) setResults(Array.isArray(data) ? data : (data.results || []));
       } catch {
         if (!cancelled) {
-          // Fall back to client-side filter of store
-          let filtered = [...properties];
-          if (query.trim()) {
-            const q = query.toLowerCase();
-            filtered = filtered.filter(p =>
-              p.title.toLowerCase().includes(q) ||
-              p.address.toLowerCase().includes(q) ||
-              p.city.toLowerCase().includes(q)
-            );
-          }
-          if (propertyType) filtered = filtered.filter(p => p.propertyType === propertyType);
-          if (bedrooms) filtered = filtered.filter(p => (p.bedrooms ?? 0) >= parseInt(bedrooms));
           const range = PRICE_RANGES.find(r => r.value === priceRange);
-          if (range) filtered = filtered.filter(p => p.askingPrice >= range.min && p.askingPrice <= range.max);
-          setResults(filtered);
+          setResults(filterProperties(properties, {
+            query: query.trim() || undefined,
+            propertyType,
+            minPrice: range?.min === Infinity ? undefined : range?.min,
+            maxPrice: range?.max === Infinity ? undefined : range?.max,
+            bedrooms: bedrooms ? parseInt(bedrooms, 10) : undefined,
+          }));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -280,7 +255,7 @@ export default function ParcelSearchPalette({
 
                 <div className="text-right flex-shrink-0">
                   <p className="text-sm font-bold text-orange-400">
-                    KES {(p.askingPrice / 1_000_000).toFixed(1)}M
+                    {p.currency} {(p.askingPrice / 1_000_000).toFixed(1)}M
                   </p>
                   <p className="text-[10px] text-white/50 flex items-center justify-end gap-1">
                     {p.bedrooms && <><Bed className="h-2.5 w-2.5" />{p.bedrooms} · </>}

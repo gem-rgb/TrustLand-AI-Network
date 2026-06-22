@@ -3,12 +3,13 @@
 
 import React, { useEffect, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { useTrustLandStore, ViewType } from '@/lib/store';
+import { useTrustLandStore, ViewType, type TrustScoreBreakdown } from '@/lib/store';
+import { canAccessView, getDashboardRoleLabel, type DashboardRole } from '@/lib/trustland-access';
 import {
   Shield, LayoutDashboard, Bot, BookOpen, ArrowRightLeft,
   FileSearch, Star, MessageSquare, Users, Activity,
-  ChevronRight, Lock, Zap, CheckCircle2, Key, Fingerprint,
-  ClipboardCheck, AlertTriangle, Clock, Eye, Plus, FileText
+  ChevronRight, Lock, LogOut, Zap, CheckCircle2, Key, Fingerprint, Loader2,
+  ClipboardCheck, AlertTriangle, Clock, Eye, Plus, FileText, Home, Building2, ShoppingCart, Sparkles
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,21 +25,23 @@ import PropertySearchView from './PropertySearchView';
 import AuthView from './AuthView';
 import AiParcelUpload from './AiParcelUpload';
 
-const NAV_ITEMS: Array<{ view: ViewType; label: string; icon: React.ReactNode; badge?: string }> = [
-  { view: 'overview', label: 'Explore Properties', icon: <Shield className="h-4 w-4" /> },
-  { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
-  { view: 'analytics', label: 'Analytics', icon: <Activity className="h-4 w-4" /> },
-  { view: 'agents', label: 'Agent Marketplace', icon: <Bot className="h-4 w-4" /> },
-  { view: 'ledger', label: 'Trust Ledger', icon: <BookOpen className="h-4 w-4" /> },
-  { view: 'audit-ledger', label: 'Audit Ledger', icon: <FileText className="h-4 w-4" /> },
-  { view: 'transactions', label: 'Transactions', icon: <ArrowRightLeft className="h-4 w-4" /> },
-  { view: 'diligence', label: 'Due Diligence', icon: <FileSearch className="h-4 w-4" /> },
-  { view: 'trust-score', label: 'Trust Scores', icon: <Star className="h-4 w-4" /> },
-  { view: 'trust-engine', label: 'Trust Engine', icon: <Zap className="h-4 w-4" />, badge: 'NEW' },
-  { view: 'messages', label: 'Messages', icon: <MessageSquare className="h-4 w-4" /> },
-  { view: 'identities', label: 'Identities', icon: <Users className="h-4 w-4" /> },
-  { view: 'verification', label: 'Verification', icon: <ClipboardCheck className="h-4 w-4" /> },
-  { view: 'autonomous-purchase', label: 'Autonomous Purchase', icon: <Zap className="h-4 w-4" />, badge: 'T3' },
+type NavItem = { view: ViewType; label: string; icon: React.ReactNode; badge?: string; roles: DashboardRole[] };
+
+const NAV_ITEMS: Array<NavItem> = [
+  { view: 'overview', label: 'Explore Properties', icon: <Shield className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'analytics', label: 'Analytics', icon: <Activity className="h-4 w-4" />, roles: ['admin'] },
+  { view: 'agents', label: 'Agent Marketplace', icon: <Bot className="h-4 w-4" />, roles: ['admin'] },
+  { view: 'ledger', label: 'Trust Ledger', icon: <BookOpen className="h-4 w-4" />, roles: ['admin'] },
+  { view: 'audit-ledger', label: 'Audit Ledger', icon: <FileText className="h-4 w-4" />, roles: ['admin'] },
+  { view: 'transactions', label: 'Transactions', icon: <ArrowRightLeft className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'diligence', label: 'Due Diligence', icon: <FileSearch className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'trust-score', label: 'Trust Scores', icon: <Star className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'trust-engine', label: 'Trust Engine', icon: <Zap className="h-4 w-4" />, badge: 'NEW', roles: ['admin'] },
+  { view: 'messages', label: 'Messages', icon: <MessageSquare className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'identities', label: 'Identities', icon: <Users className="h-4 w-4" />, roles: ['admin'] },
+  { view: 'verification', label: 'Verification', icon: <ClipboardCheck className="h-4 w-4" />, roles: ['admin'] },
+  { view: 'autonomous-purchase', label: 'Autonomous Purchase', icon: <Zap className="h-4 w-4" />, badge: 'T3', roles: ['buyer'] },
 ];
 
 // ─── Error Boundary ──────────────────────────────────────────────────────────
@@ -66,7 +69,7 @@ class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, {
 }
 
 export default function TrustLandLayout() {
-  const { currentView, setCurrentView, isAuthenticated, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, dashboardStats, addLiveActivity } = useTrustLandStore();
+  const { currentView, setCurrentView, isAuthenticated, dashboardRole, restoreAuthSession, logout, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, dashboardStats, addLiveActivity } = useTrustLandStore();
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const socketRef = useRef<Socket | null>(null);
 
@@ -86,6 +89,18 @@ export default function TrustLandLayout() {
   }, [fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles]);
 
   useEffect(() => {
+    restoreAuthSession();
+  }, [restoreAuthSession]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      return;
+    }
+
     loadAllData();
 
     // Connect to WebSocket (with error handling to prevent crashes)
@@ -132,7 +147,7 @@ export default function TrustLandLayout() {
       clearInterval(interval);
       if (socketRef.current) socketRef.current.disconnect();
     };
-  }, []);
+  }, [isAuthenticated, loadAllData, fetchTrustLedger, fetchDocuments, fetchTransactions, fetchMessages, addLiveActivity]);
 
   const renderView = () => {
     switch (currentView) {
@@ -202,7 +217,7 @@ export default function TrustLandLayout() {
         {/* Nav Items */}
         <ScrollArea className="flex-1 py-2">
           <nav className="space-y-1 px-2">
-            {NAV_ITEMS.map(item => (
+            {NAV_ITEMS.filter(item => item.roles.includes(dashboardRole) && canAccessView(dashboardRole, item.view)).map(item => (
               <Button
                 key={item.view}
                 variant={currentView === item.view ? 'secondary' : 'ghost'}
@@ -216,7 +231,7 @@ export default function TrustLandLayout() {
                 onClick={() => setCurrentView(item.view)}
               >
                 {item.icon}
-                {sidebarOpen && <span>{item.label}</span>}
+                {sidebarOpen && <span>{item.view === 'dashboard' ? getDashboardRoleLabel(dashboardRole) : item.label}</span>}
                 {sidebarOpen && item.badge && <Badge variant="secondary" className="ml-auto text-[10px] bg-orange-500 text-white border-0">{item.badge}</Badge>}
               </Button>
             ))}
@@ -233,11 +248,23 @@ export default function TrustLandLayout() {
           >
             <ChevronRight className={`h-4 w-4 transition-transform ${sidebarOpen ? 'rotate-180' : ''}`} />
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              'w-full mt-2 text-white/60 hover:bg-white/10 hover:text-white',
+              !sidebarOpen && 'justify-center px-0'
+            )}
+            onClick={logout}
+          >
+            <LogOut className="h-4 w-4" />
+            {sidebarOpen && <span className="ml-2">Sign Out</span>}
+          </Button>
           {sidebarOpen && dashboardStats && (
             <div className="mt-2 text-[10px] text-white/50 space-y-1">
               <div className="flex items-center gap-1">
                 <Lock className="h-3 w-3 text-orange-400" />
-                <span>Zero-Trust Active</span>
+                <span>{getDashboardRoleLabel(dashboardRole)} Active</span>
               </div>
               <div className="flex items-center gap-1">
                 <Activity className="h-3 w-3 text-orange-400" />
@@ -382,7 +409,7 @@ function OverviewView() {
 
 // ─── Dashboard View ────────────────────────────────────────────────────────
 
-function DashboardView() {
+function AdminDashboardView() {
   const { dashboardStats, agents, transactions, trustLedger } = useTrustLandStore();
 
   if (!dashboardStats) return (
@@ -466,7 +493,7 @@ function DashboardView() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium truncate text-white">{entry.eventType.replace(/_/g, ' ')}</p>
                   <p className="text-[10px] text-white/50 truncate">
-                    {entry.actorDid.slice(0, 20)}... → {entry.eventData.action || entry.eventData.credentialType || ''}
+                    {entry.actorDid.slice(0, 20)}... → {String(entry.eventData.action ?? entry.eventData.credentialType ?? '')}
                   </p>
                 </div>
                 <span className="text-[10px] text-white/40 whitespace-nowrap">{new Date(entry.timestamp).toLocaleTimeString()}</span>
@@ -497,6 +524,409 @@ function DashboardView() {
 }
 
 // ─── Agent Marketplace ─────────────────────────────────────────────────────
+
+function DashboardView() {
+  const { dashboardRole } = useTrustLandStore();
+
+  if (dashboardRole === 'buyer') return <BuyerDashboardView />;
+  if (dashboardRole === 'seller') return <SellerDashboardView />;
+  return <AdminDashboardView />;
+}
+
+function BuyerDashboardView() {
+  const { dashboardStats, properties, transactions, messages, setCurrentView, sessionDisplayName, sessionIdentityDid, sessionKycStatus } = useTrustLandStore();
+
+  if (!dashboardStats) {
+    return (
+      <div className="p-8 text-center text-white">
+        <Activity className="h-12 w-12 mx-auto text-orange-400 mb-4 animate-pulse" />
+        <h2 className="text-xl font-bold">Loading Buyer Dashboard</h2>
+        <p className="text-white/60">Preparing personalized property discovery...</p>
+      </div>
+    );
+  }
+
+  const availableProperties = properties
+    .filter(property => property.status !== 'sold' && property.status !== 'off-market')
+    .sort((a, b) => b.trustScore - a.trustScore);
+  const featuredProperties = availableProperties.slice(0, 6);
+  const highTrustMatches = availableProperties.filter(property => property.trustScore >= 90).length;
+  const activeTransactions = transactions.filter(tx => tx.status !== 'completed' && tx.status !== 'failed' && tx.status !== 'cancelled').length;
+  const buyerMessages = sessionIdentityDid
+    ? messages.filter(message => message.senderDid === sessionIdentityDid || message.receiverDid === sessionIdentityDid).length
+    : messages.length;
+
+  return (
+    <div className="p-6 space-y-6 text-white">
+      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#102e63] via-[#0c2350] to-[#081a38] p-6 shadow-2xl shadow-orange-950/20">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <Badge className="bg-orange-500/20 text-orange-200 border border-orange-500/30">
+                <Home className="h-3 w-3 mr-1" /> Buyer Dashboard
+              </Badge>
+              <Badge className={cn(
+                'border',
+                sessionKycStatus === 'verified'
+                  ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-200 border-amber-500/30'
+              )}>
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                {sessionKycStatus === 'verified' ? 'KYC Verified' : 'KYC Pending'}
+              </Badge>
+            </div>
+            <h1 className="text-3xl lg:text-4xl font-bold leading-tight">
+              Welcome back{sessionDisplayName ? `, ${sessionDisplayName}` : ''}
+            </h1>
+            <p className="mt-3 text-white/70 max-w-xl">
+              Browse verified listings, monitor active deals, and move straight into autonomous purchase flows when you are ready to buy.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => setCurrentView('overview')} variant="outline" className="bg-white/5 border-white/15 text-white hover:bg-white/10">
+              <Eye className="h-4 w-4 mr-2" /> Explore Market
+            </Button>
+            <Button onClick={() => setCurrentView('autonomous-purchase')} className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white border-0">
+              <ShoppingCart className="h-4 w-4 mr-2" /> Open Autonomous Purchase
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'Available Listings', value: availableProperties.length, icon: <Building2 className="h-4 w-4" />, accent: 'from-blue-500 to-indigo-500' },
+          { label: 'High Trust Matches', value: highTrustMatches, icon: <Star className="h-4 w-4" />, accent: 'from-amber-500 to-orange-500' },
+          { label: 'Active Transactions', value: activeTransactions, icon: <ArrowRightLeft className="h-4 w-4" />, accent: 'from-emerald-500 to-teal-500' },
+          { label: 'Messages', value: buyerMessages, icon: <MessageSquare className="h-4 w-4" />, accent: 'from-rose-500 to-red-500' },
+        ].map((card, index) => (
+          <div key={index} className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+            <div className={cn('absolute -top-8 -right-8 h-20 w-20 rounded-full bg-gradient-to-br opacity-20 blur-xl', card.accent)} />
+            <div className="relative">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-white/60">{card.label}</p>
+                <div className={cn('h-7 w-7 rounded-lg bg-gradient-to-br flex items-center justify-center text-white', card.accent)}>
+                  {card.icon}
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-white">{card.value}</p>
+              <p className="text-xs text-white/50">Network-synced data</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold">Recommended for You</h3>
+                <p className="text-sm text-white/60">Curated by trust score, availability, and current market activity</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setCurrentView('overview')} className="bg-white/5 border-white/15 text-white hover:bg-white/10">
+                <Sparkles className="h-4 w-4 mr-2" /> Refine Search
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {featuredProperties.slice(0, 4).map(property => (
+                <button
+                  key={property.id}
+                  onClick={() => setCurrentView('overview')}
+                  className="text-left rounded-xl border border-white/10 bg-[#0c2350]/80 p-4 hover:border-orange-500/40 hover:bg-[#102e63] transition group"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold group-hover:text-orange-200 transition">{property.title}</p>
+                      <p className="text-xs text-white/50 mt-1">{property.city}, {property.region}</p>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] border-white/20 text-white/70">{property.propertyType}</Badge>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-sm">
+                    <span className="text-orange-300 font-semibold">{property.currency} {(property.askingPrice / 1_000_000).toFixed(2)}M</span>
+                    <span className="text-white/60">Trust {property.trustScore}%</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold">Autonomous Purchase Pipeline</h3>
+                <p className="text-sm text-white/60">Buyer-only workflow for delegated search, negotiation, and execution</p>
+              </div>
+              <Button size="sm" onClick={() => setCurrentView('autonomous-purchase')} className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 border-0 text-white">
+                <ShoppingCart className="h-4 w-4 mr-2" /> Start Purchase
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                { title: 'Search', description: 'Find verified listings that match your budget and property type.', view: 'overview' as const },
+                { title: 'Review', description: 'Run due diligence, compare trust score, and shortlist the best fit.', view: 'diligence' as const },
+                { title: 'Execute', description: 'Let the buyer agent negotiate and move into purchase automation.', view: 'autonomous-purchase' as const },
+              ].map(step => (
+                <div key={step.title} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-sm font-semibold">{step.title}</p>
+                  <p className="text-xs text-white/60 mt-2">{step.description}</p>
+                  <Button size="sm" variant="ghost" className="mt-3 px-0 text-orange-300 hover:text-orange-200 hover:bg-transparent" onClick={() => setCurrentView(step.view)}>
+                    Open {step.title}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <h3 className="text-lg font-semibold mb-3">Quick Actions</h3>
+            <div className="space-y-2">
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('overview')}>
+                <Home className="h-4 w-4 mr-2" /> Open Properties
+              </Button>
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('transactions')}>
+                <ArrowRightLeft className="h-4 w-4 mr-2" /> View Transactions
+              </Button>
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('messages')}>
+                <MessageSquare className="h-4 w-4 mr-2" /> Open Messages
+              </Button>
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('diligence')}>
+                <FileSearch className="h-4 w-4 mr-2" /> Due Diligence
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <h3 className="text-lg font-semibold mb-3">Live Market Snapshot</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">Average Trust Score</span>
+                <span className="font-semibold text-white">{dashboardStats.averageTrustScore}%</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">Total Properties</span>
+                <span className="font-semibold text-white">{dashboardStats.properties}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">Open Deals</span>
+                <span className="font-semibold text-white">{activeTransactions}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">Identity Status</span>
+                <span className="font-semibold text-emerald-300">{sessionKycStatus === 'verified' ? 'Verified' : 'Pending'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SellerDashboardView() {
+  const { dashboardStats, properties, transactions, messages, setCurrentView, sessionDisplayName, sessionIdentityDid, sessionKycStatus } = useTrustLandStore();
+  const [aiUploadOpen, setAiUploadOpen] = React.useState(false);
+
+  if (!dashboardStats) {
+    return (
+      <div className="p-8 text-center text-white">
+        <Activity className="h-12 w-12 mx-auto text-orange-400 mb-4 animate-pulse" />
+        <h2 className="text-xl font-bold">Loading Seller Dashboard</h2>
+        <p className="text-white/60">Preparing your listing workspace...</p>
+      </div>
+    );
+  }
+
+  const ownedProperties = sessionIdentityDid
+    ? properties.filter(property => property.ownerDid === sessionIdentityDid)
+    : properties.filter(property => property.status !== 'sold' && property.status !== 'off-market');
+  const activeOffers = sessionIdentityDid
+    ? transactions.filter(tx => tx.sellerDid === sessionIdentityDid && tx.status !== 'completed' && tx.status !== 'failed' && tx.status !== 'cancelled')
+    : transactions.filter(tx => tx.status !== 'completed' && tx.status !== 'failed' && tx.status !== 'cancelled');
+  const sellerMessages = sessionIdentityDid
+    ? messages.filter(message => message.senderDid === sessionIdentityDid || message.receiverDid === sessionIdentityDid)
+    : messages;
+
+  return (
+    <div className="p-6 space-y-6 text-white">
+      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#112c4d] via-[#0c2350] to-[#081a38] p-6 shadow-2xl shadow-slate-950/20">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <Badge className="bg-teal-500/20 text-teal-200 border border-teal-500/30">
+                <Building2 className="h-3 w-3 mr-1" /> Seller Dashboard
+              </Badge>
+              <Badge className={cn(
+                'border',
+                sessionKycStatus === 'verified'
+                  ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-200 border-amber-500/30'
+              )}>
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                {sessionKycStatus === 'verified' ? 'KYC Verified' : 'KYC Pending'}
+              </Badge>
+            </div>
+            <h1 className="text-3xl lg:text-4xl font-bold leading-tight">
+              Manage listings{sessionDisplayName ? `, ${sessionDisplayName}` : ''}
+            </h1>
+            <p className="mt-3 text-white/70 max-w-xl">
+              Publish properties with AI assistance, monitor buyer interest, and keep the sales workflow separate from buyer-facing tools.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => setCurrentView('overview')} variant="outline" className="bg-white/5 border-white/15 text-white hover:bg-white/10">
+              <Eye className="h-4 w-4 mr-2" /> Review Market
+            </Button>
+            <Button onClick={() => setAiUploadOpen(true)} className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white border-0">
+              <Sparkles className="h-4 w-4 mr-2" /> List Property via AI
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: 'My Listings', value: ownedProperties.length, icon: <Home className="h-4 w-4" />, accent: 'from-teal-500 to-emerald-500' },
+          { label: 'Active Offers', value: activeOffers.length, icon: <ArrowRightLeft className="h-4 w-4" />, accent: 'from-blue-500 to-indigo-500' },
+          { label: 'Messages', value: sellerMessages.length, icon: <MessageSquare className="h-4 w-4" />, accent: 'from-rose-500 to-red-500' },
+          { label: 'Trust Avg', value: `${dashboardStats.averageTrustScore}%`, icon: <Star className="h-4 w-4" />, accent: 'from-amber-500 to-orange-500' },
+        ].map((card, index) => (
+          <div key={index} className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+            <div className={cn('absolute -top-8 -right-8 h-20 w-20 rounded-full bg-gradient-to-br opacity-20 blur-xl', card.accent)} />
+            <div className="relative">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-white/60">{card.label}</p>
+                <div className={cn('h-7 w-7 rounded-lg bg-gradient-to-br flex items-center justify-center text-white', card.accent)}>
+                  {card.icon}
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-white">{card.value}</p>
+              <p className="text-xs text-white/50">Sales workspace</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2 space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold">My Listings</h3>
+                <p className="text-sm text-white/60">Properties tied to your verified seller identity</p>
+              </div>
+              <Button size="sm" onClick={() => setAiUploadOpen(true)} className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 border-0 text-white">
+                <Sparkles className="h-4 w-4 mr-2" /> New AI Listing
+              </Button>
+            </div>
+            {ownedProperties.length ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                {ownedProperties.slice(0, 4).map(property => (
+                  <div key={property.id} className="rounded-xl border border-white/10 bg-[#0c2350]/80 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{property.title}</p>
+                        <p className="text-xs text-white/50 mt-1">{property.city}, {property.region}</p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] border-white/20 text-white/70">{property.status.replace(/_/g, ' ')}</Badge>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between text-sm">
+                      <span className="text-teal-200 font-semibold">{property.currency} {(property.askingPrice / 1_000_000).toFixed(2)}M</span>
+                      <span className="text-white/60">Trust {property.trustScore}%</span>
+                    </div>
+                    <p className="mt-2 text-xs text-white/55">{property.description}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/15 bg-white/5 p-8 text-center">
+                <Building2 className="h-10 w-10 mx-auto text-white/30 mb-3" />
+                <p className="font-medium">No listings are linked to this seller yet.</p>
+                <p className="text-sm text-white/60 mt-1">Use AI parcel upload to publish a new property listing.</p>
+                <Button className="mt-4 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 border-0 text-white" onClick={() => setAiUploadOpen(true)}>
+                  <Sparkles className="h-4 w-4 mr-2" /> Launch AI Listing
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold">Sales Workflow</h3>
+                <p className="text-sm text-white/60">Restricted to seller-facing actions and deal management</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setCurrentView('transactions')} className="bg-white/5 border-white/15 text-white hover:bg-white/10">
+                <ArrowRightLeft className="h-4 w-4 mr-2" /> Open Deals
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                { title: 'Publish', description: 'Create or update a property listing with AI-assisted extraction.', view: 'dashboard' as const },
+                { title: 'Negotiate', description: 'Review offers, buyer messages, and transaction status.', view: 'messages' as const },
+                { title: 'Close', description: 'Track due diligence and final transfer progress.', view: 'transactions' as const },
+              ].map(step => (
+                <div key={step.title} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-sm font-semibold">{step.title}</p>
+                  <p className="text-xs text-white/60 mt-2">{step.description}</p>
+                  <Button size="sm" variant="ghost" className="mt-3 px-0 text-teal-200 hover:text-teal-100 hover:bg-transparent" onClick={() => setCurrentView(step.view)}>
+                    Open {step.title}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <h3 className="text-lg font-semibold mb-3">Seller Actions</h3>
+            <div className="space-y-2">
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setAiUploadOpen(true)}>
+                <Sparkles className="h-4 w-4 mr-2" /> AI Parcel Upload
+              </Button>
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('overview')}>
+                <Home className="h-4 w-4 mr-2" /> Open Market
+              </Button>
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('messages')}>
+                <MessageSquare className="h-4 w-4 mr-2" /> Buyer Messages
+              </Button>
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('transactions')}>
+                <ArrowRightLeft className="h-4 w-4 mr-2" /> Transaction Tracker
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
+            <h3 className="text-lg font-semibold mb-3">Seller Snapshot</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">Average Trust Score</span>
+                <span className="font-semibold text-white">{dashboardStats.averageTrustScore}%</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">Active Offers</span>
+                <span className="font-semibold text-white">{activeOffers.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">My Listings</span>
+                <span className="font-semibold text-white">{ownedProperties.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-white/60">Identity Status</span>
+                <span className="font-semibold text-emerald-300">{sessionKycStatus === 'verified' ? 'Verified' : 'Pending'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <AiParcelUpload open={aiUploadOpen} onClose={() => setAiUploadOpen(false)} />
+    </div>
+  );
+}
 
 function AgentMarketplace() {
   const { agents, identities, delegateAuthority, assignAgent, transactions, fetchAgentActivity, transactionEvents } = useTrustLandStore();
@@ -991,7 +1421,7 @@ function TransactionWorkflow() {
                           </div>
                           <p className="text-xs text-muted-foreground mt-1 truncate">{event.actorId.slice(0, 24)}...</p>
                           {event.metadata && (
-                            <p className="text-[10px] text-muted-foreground mt-1">{typeof event.metadata === 'object' ? (event.metadata as Record<string, unknown>).notes || JSON.stringify(event.metadata).slice(0, 80) : String(event.metadata).slice(0, 80)}</p>
+                            <p className="text-[10px] text-muted-foreground mt-1">{typeof event.metadata === 'object' ? String((event.metadata as Record<string, unknown>).notes ?? JSON.stringify(event.metadata).slice(0, 80)) : String(event.metadata).slice(0, 80)}</p>
                           )}
                           <p className="text-[10px] text-muted-foreground mt-1">{new Date(event.timestamp).toLocaleString()}</p>
                         </div>
@@ -1347,7 +1777,7 @@ function DueDiligenceView() {
 function TrustScoreView() {
   const { identities, fetchTrustScore } = useTrustLandStore();
   const [selectedDid, setSelectedDid] = React.useState<string | null>(null);
-  const [trustData, setTrustData] = React.useState<Record<string, unknown> | null>(null);
+  const [trustData, setTrustData] = React.useState<TrustScoreBreakdown | null>(null);
   const [loading, setLoading] = React.useState(false);
 
   const handleSelect = async (did: string) => {
@@ -1393,7 +1823,7 @@ function TrustScoreView() {
               {/* Main Score */}
               <div className="border border-border rounded-xl p-6 bg-card text-center">
                 <div className="inline-flex items-center justify-center h-24 w-24 rounded-full border-4 border-emerald-500 mb-3">
-                  <span className="text-3xl font-bold text-emerald-600">{(trustData as Record<string, unknown>).trustScore as number}</span>
+                  <span className="text-3xl font-bold text-emerald-600">{trustData.trustScore}</span>
                 </div>
                 <h3 className="font-semibold text-lg">Composite Trust Score</h3>
                 <p className="text-xs text-muted-foreground font-mono">{selectedDid}</p>
@@ -1403,14 +1833,14 @@ function TrustScoreView() {
               <div className="border border-border rounded-xl p-5 bg-card">
                 <h3 className="font-semibold mb-4">Score Breakdown</h3>
                 <div className="space-y-3">
-                  {Object.entries((trustData as Record<string, Record<string, Record<string, unknown>>>).breakdown || {}).map(([key, val]) => (
+                  {Object.entries(trustData.breakdown || {}).map(([key, val]) => (
                     <div key={key}>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm">{(val as Record<string, unknown>).description as string}</span>
-                        <span className="text-sm font-medium">{(val as Record<string, unknown>).score as number}/{(val as Record<string, unknown>).max as number}</span>
+                        <span className="text-sm">{val.description}</span>
+                        <span className="text-sm font-medium">{val.score}/{val.max}</span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2">
-                        <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${((val as Record<string, unknown>).score as number / (val as Record<string, unknown>).max as number) * 100}%` }} />
+                        <div className="bg-emerald-500 h-2 rounded-full" style={{ width: `${(val.score / val.max) * 100}%` }} />
                       </div>
                     </div>
                   ))}
@@ -1420,11 +1850,11 @@ function TrustScoreView() {
               {/* Stats */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="border border-border rounded-lg p-4 bg-card text-center">
-                  <p className="text-2xl font-bold">{(trustData as Record<string, unknown>).totalTransactions as number}</p>
+                  <p className="text-2xl font-bold">{trustData.totalTransactions}</p>
                   <p className="text-xs text-muted-foreground">Transactions</p>
                 </div>
                 <div className="border border-border rounded-lg p-4 bg-card text-center">
-                  <p className="text-2xl font-bold">{(trustData as Record<string, unknown>).totalActions as number}</p>
+                  <p className="text-2xl font-bold">{trustData.totalActions}</p>
                   <p className="text-xs text-muted-foreground">Total Actions</p>
                 </div>
               </div>
@@ -3000,8 +3430,8 @@ function AuditLedgerDashboard() {
   });
 
   const handleVerify = async () => {
-    const result = await verifyAuditLedger();
-    if (result) setVerificationResult(result as { valid: boolean; totalEntries: number; invalidBlock: number | null; tamperedEntries: string[] });
+    const result = (await verifyAuditLedger()) as { valid: boolean; totalEntries: number; invalidBlock: number | null; tamperedEntries: string[] } | undefined;
+    if (result) setVerificationResult(result);
   };
 
   const handleExport = async (format: 'json' | 'csv') => {

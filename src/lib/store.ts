@@ -1,6 +1,7 @@
 // TrustLand AI Network - Global State Store (Zustand)
 // Updated with Terminal 3 Agent Auth SDK integration
 import { create } from 'zustand';
+import { canAccessView, deriveDashboardRole, type DashboardRole, type KycStatus } from './trustland-access';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,73 @@ export type ViewType =
   | 'audit-ledger'       // NEW
   | 'analytics';         // NEW
 
+const AUTH_SESSION_STORAGE_KEY = 'trustland-auth-session';
+const AUTH_VIEW_TYPES = new Set<ViewType>([
+  'overview',
+  'auth',
+  'dashboard',
+  'agents',
+  'ledger',
+  'transactions',
+  'diligence',
+  'trust-score',
+  'messages',
+  'identities',
+  'verification',
+  'autonomous-purchase',
+  'trust-engine',
+  'audit-ledger',
+  'analytics',
+]);
+
+type AuthSessionState = {
+  currentView: ViewType;
+  isAuthenticated: boolean;
+  dashboardRole: DashboardRole;
+  identityDid: string | null;
+  displayName: string | null;
+  kycStatus: KycStatus;
+};
+
+function isViewType(value: unknown): value is ViewType {
+  return typeof value === 'string' && AUTH_VIEW_TYPES.has(value as ViewType);
+}
+
+function readAuthSession(): AuthSessionState | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<AuthSessionState>;
+    if (typeof parsed.isAuthenticated !== 'boolean') return null;
+
+    return {
+      currentView: isViewType(parsed.currentView) ? parsed.currentView : 'auth',
+      isAuthenticated: parsed.isAuthenticated,
+      dashboardRole: parsed.dashboardRole === 'buyer' || parsed.dashboardRole === 'seller' ? parsed.dashboardRole : 'admin',
+      identityDid: typeof parsed.identityDid === 'string' ? parsed.identityDid : null,
+      displayName: typeof parsed.displayName === 'string' ? parsed.displayName : null,
+      kycStatus: parsed.kycStatus === 'pending' || parsed.kycStatus === 'verified' || parsed.kycStatus === 'rejected'
+        ? parsed.kycStatus
+        : 'unverified',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeAuthSession(session: AuthSessionState) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Ignore storage failures and keep the in-memory session state.
+  }
+}
+
 export interface T3Identity {
   did: string;
   publicKey: string;
@@ -29,7 +97,19 @@ export interface T3Identity {
   status: string;
   verifiedAt: string | null;
   createdAt: string;
-  profile: { name: string; email: string; organization?: string; role?: string };
+  profile: {
+    name: string;
+    email: string;
+    organization?: string;
+    role?: string;
+    phone?: string;
+    country?: string;
+    address?: string;
+    dateOfBirth?: string;
+    nationalId?: string;
+    kycStatus?: KycStatus;
+    kycVerifiedAt?: string;
+  };
   t3ApiKey?: string;
   verifiableCredentialId?: string;
   t3Integrated?: boolean;
@@ -384,7 +464,21 @@ interface TrustLandStore {
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
   isAuthenticated: boolean;
+  dashboardRole: DashboardRole;
+  sessionIdentityDid: string | null;
+  sessionDisplayName: string | null;
+  sessionKycStatus: KycStatus;
+  setAuthSession: (session: {
+    authenticated: boolean;
+    currentView?: ViewType;
+    dashboardRole?: DashboardRole;
+    identityDid?: string | null;
+    displayName?: string | null;
+    kycStatus?: KycStatus;
+  }) => void;
   setIsAuthenticated: (authenticated: boolean) => void;
+  restoreAuthSession: () => void;
+  logout: () => void;
 
   // Data
   identities: T3Identity[];
@@ -479,7 +573,7 @@ interface TrustLandStore {
 
 const API_BASE = '/api';
 
-async function apiFetch(path: string, options?: RequestInit, retries = 2): Promise<unknown> {
+async function apiFetch(path: string, options?: RequestInit, retries = 2): Promise<any> {
   const url = `${API_BASE}${path}`;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -501,11 +595,132 @@ async function apiFetch(path: string, options?: RequestInit, retries = 2): Promi
 
 export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
   currentView: 'auth',
-  setCurrentView: (view) => set(state => ({
-    currentView: !state.isAuthenticated && view !== 'auth' ? 'auth' : view,
-  })),
+  dashboardRole: 'admin',
+  sessionIdentityDid: null,
+  sessionDisplayName: null,
+  sessionKycStatus: 'unverified',
+  setCurrentView: (view) => set(state => {
+    const requestedView: ViewType = state.isAuthenticated && view === 'auth' ? 'dashboard' : view;
+    const currentView: ViewType = !state.isAuthenticated
+      ? 'auth'
+      : canAccessView(state.dashboardRole, requestedView)
+        ? requestedView
+        : 'dashboard';
+    writeAuthSession({
+      currentView,
+      isAuthenticated: state.isAuthenticated,
+      dashboardRole: state.dashboardRole,
+      identityDid: state.sessionIdentityDid,
+      displayName: state.sessionDisplayName,
+      kycStatus: state.sessionKycStatus,
+    });
+    return { currentView };
+  }),
   isAuthenticated: false,
-  setIsAuthenticated: (authenticated) => set({ isAuthenticated: authenticated }),
+  setAuthSession: (session) => set(state => {
+    const authenticated = session.authenticated;
+    const dashboardRole = session.dashboardRole || state.dashboardRole;
+    const requestedView: ViewType = session.currentView && session.currentView !== 'auth'
+      ? session.currentView
+      : 'dashboard';
+    const currentView: ViewType = authenticated
+      ? canAccessView(dashboardRole, requestedView)
+        ? requestedView
+        : 'dashboard'
+      : 'auth';
+    const nextState: {
+      isAuthenticated: boolean;
+      dashboardRole: DashboardRole;
+      sessionIdentityDid: string | null;
+      sessionDisplayName: string | null;
+      sessionKycStatus: KycStatus;
+      currentView: ViewType;
+    } = {
+      isAuthenticated: authenticated,
+      dashboardRole,
+      sessionIdentityDid: authenticated ? (session.identityDid ?? state.sessionIdentityDid) : null,
+      sessionDisplayName: authenticated ? (session.displayName ?? state.sessionDisplayName) : null,
+      sessionKycStatus: authenticated ? (session.kycStatus ?? state.sessionKycStatus) : 'unverified',
+      currentView,
+    };
+    writeAuthSession({
+      currentView: nextState.currentView,
+      isAuthenticated: nextState.isAuthenticated,
+      dashboardRole: nextState.dashboardRole,
+      identityDid: nextState.sessionIdentityDid,
+      displayName: nextState.sessionDisplayName,
+      kycStatus: nextState.sessionKycStatus,
+    });
+    return nextState;
+  }),
+  setIsAuthenticated: (authenticated) => set(state => {
+    const requestedView: ViewType = state.currentView === 'auth' ? 'dashboard' : state.currentView;
+    const currentView: ViewType = authenticated
+      ? canAccessView(state.dashboardRole, requestedView)
+        ? requestedView
+        : 'dashboard'
+      : 'auth';
+    const nextState: {
+      isAuthenticated: boolean;
+      currentView: ViewType;
+      dashboardRole: DashboardRole;
+      sessionIdentityDid: string | null;
+      sessionDisplayName: string | null;
+      sessionKycStatus: KycStatus;
+    } = {
+      isAuthenticated: authenticated,
+      currentView,
+      dashboardRole: authenticated ? state.dashboardRole : 'admin',
+      sessionIdentityDid: authenticated ? state.sessionIdentityDid : null,
+      sessionDisplayName: authenticated ? state.sessionDisplayName : null,
+      sessionKycStatus: authenticated ? state.sessionKycStatus : 'unverified',
+    };
+    writeAuthSession({
+      currentView,
+      isAuthenticated: authenticated,
+      dashboardRole: nextState.dashboardRole,
+      identityDid: nextState.sessionIdentityDid,
+      displayName: nextState.sessionDisplayName,
+      kycStatus: nextState.sessionKycStatus,
+    });
+    return nextState;
+  }),
+  restoreAuthSession: () => {
+    const session = readAuthSession();
+    if (!session) return;
+
+    const dashboardRole = deriveDashboardRole(session.dashboardRole);
+    const requestedView: ViewType = session.currentView === 'auth' ? 'dashboard' : session.currentView;
+    const currentView: ViewType = session.isAuthenticated && canAccessView(dashboardRole, requestedView)
+      ? requestedView
+      : 'auth';
+    set({
+      currentView,
+      isAuthenticated: session.isAuthenticated,
+      dashboardRole,
+      sessionIdentityDid: session.identityDid,
+      sessionDisplayName: session.displayName,
+      sessionKycStatus: session.kycStatus,
+    });
+  },
+  logout: () => {
+    writeAuthSession({
+      currentView: 'auth',
+      isAuthenticated: false,
+      dashboardRole: 'admin',
+      identityDid: null,
+      displayName: null,
+      kycStatus: 'unverified',
+    });
+    set({
+      currentView: 'auth',
+      isAuthenticated: false,
+      dashboardRole: 'admin',
+      sessionIdentityDid: null,
+      sessionDisplayName: null,
+      sessionKycStatus: 'unverified',
+    });
+  },
 
   identities: [],
   agents: [],
