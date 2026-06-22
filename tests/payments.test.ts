@@ -18,6 +18,8 @@ type PaymentSessionLike = {
   kycStatus: 'unverified' | 'pending' | 'verified' | 'rejected';
 };
 
+const TERMINAL_TRANSACTION_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
 type TestCase = {
   name: string;
   run: () => Promise<void>;
@@ -333,6 +335,58 @@ test('marks refunded payments and restores reserved listings', async () => {
   const result = await payments.processStripeWebhookEvent(refundEvent);
   assert.equal(result.payment?.status, 'refunded');
   assert.equal(property.status, 'available');
+});
+
+test('lets a seller update and archive their own property listing', async () => {
+  const { backend } = await loadModules();
+  const sellerIdentity = backend.data.identities.find((identity) => identity.profile.role === 'seller');
+  assert.ok(sellerIdentity);
+
+  const ownedProperty = backend.data.properties.find((property) =>
+    property.ownerDid === sellerIdentity!.did
+    && !backend.data.transactions.some((tx) => tx.propertyId === property.id && !TERMINAL_TRANSACTION_STATUSES.has(tx.status))
+  );
+  assert.ok(ownedProperty);
+
+  const propertyManagement = await import('../src/lib/property-management');
+  const session = getSession({
+    userId: sellerIdentity!.did,
+    role: 'seller',
+    displayName: sellerIdentity!.profile.name,
+  });
+
+  const updatedTitle = `${ownedProperty!.title} - Updated`;
+  const originalAskingPrice = ownedProperty!.askingPrice;
+  const updateBody = propertyManagement.updatePropertyListing(ownedProperty!.id, session, {
+    title: updatedTitle,
+    askingPrice: originalAskingPrice + 500000,
+    description: `${ownedProperty!.description} Updated by seller.`,
+    features: ['Garden', 'Security'],
+    status: 'for_sale',
+  });
+
+  assert.equal(updateBody.title, updatedTitle);
+  assert.equal(updateBody.askingPrice, originalAskingPrice + 500000);
+  assert.equal(updateBody.status, 'for_sale');
+
+  const deleteBody = propertyManagement.archivePropertyListing(ownedProperty!.id, session, 'No longer listed');
+
+  assert.equal(deleteBody.status, 'off-market');
+  assert.ok(deleteBody.archivedAt);
+});
+
+test('rejects unauthorized edits on properties they do not own', async () => {
+  const { backend } = await loadModules();
+  const property = backend.data.properties[0];
+  assert.ok(property);
+
+  const propertyManagement = await import('../src/lib/property-management');
+  const session = getSession({ role: 'buyer' });
+
+  assert.throws(
+    () => propertyManagement.updatePropertyListing(property.id, session, { title: 'Unauthorized update' }),
+    (error: unknown) => Boolean(error && typeof error === 'object' && 'statusCode' in error && (error as { statusCode: number }).statusCode === 403)
+  );
 });
 
 async function main() {

@@ -27,6 +27,7 @@ import AiParcelUpload from './AiParcelUpload';
 import FinanceDashboardView from './FinanceDashboardView';
 import SellerWithdrawalView from './SellerWithdrawalView';
 import TransactionPaymentView from './TransactionPaymentView';
+import SellerPropertyManager from './SellerPropertyManager';
 
 type NavItem = { view: ViewType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string; roles: DashboardRole[] };
 
@@ -822,46 +823,7 @@ function SellerDashboardView() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 space-y-4">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <div>
-                <h3 className="text-lg font-semibold">My Listings</h3>
-                <p className="text-sm text-white/60">Properties tied to your verified seller identity</p>
-              </div>
-              <Button size="sm" onClick={() => setAiUploadOpen(true)} className="bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 border-0 text-white">
-                <Sparkles className="h-4 w-4 mr-2" /> New AI Listing
-              </Button>
-            </div>
-            {ownedProperties.length ? (
-              <div className="grid gap-3 md:grid-cols-2">
-                {ownedProperties.slice(0, 4).map(property => (
-                  <div key={property.id} className="rounded-xl border border-white/10 bg-[#0c2350]/80 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold">{property.title}</p>
-                        <p className="text-xs text-white/50 mt-1">{property.city}, {property.region}</p>
-                      </div>
-                      <Badge variant="outline" className="text-[10px] border-white/20 text-white/70">{property.status.replace(/_/g, ' ')}</Badge>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between text-sm">
-                      <span className="text-teal-200 font-semibold">{property.currency} {(property.askingPrice / 1_000_000).toFixed(2)}M</span>
-                      <span className="text-white/60">Trust {property.trustScore}%</span>
-                    </div>
-                    <p className="mt-2 text-xs text-white/55">{property.description}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-white/15 bg-white/5 p-8 text-center">
-                <Building2 className="h-10 w-10 mx-auto text-white/30 mb-3" />
-                <p className="font-medium">No listings are linked to this seller yet.</p>
-                <p className="text-sm text-white/60 mt-1">Use AI parcel upload to publish a new property listing.</p>
-                <Button className="mt-4 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 border-0 text-white" onClick={() => setAiUploadOpen(true)}>
-                  <Sparkles className="h-4 w-4 mr-2" /> Launch AI Listing
-                </Button>
-              </div>
-            )}
-          </div>
+          <SellerPropertyManager onCreateNewListing={() => setAiUploadOpen(true)} />
 
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
             <div className="flex items-center justify-between mb-4">

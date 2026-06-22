@@ -220,10 +220,14 @@ function PropertyInfoWindow({
 export default function GoogleMapsView({
   heightClass = 'h-full',
   properties: injectedProperties,
+  selectedPropertyId,
+  onPropertySelect,
 }: {
   heightClass?: string;
   /** Optional pre-filtered property list. Falls back to all store properties. */
   properties?: Property[];
+  selectedPropertyId?: string | null;
+  onPropertySelect?: (property: Property | null) => void;
 }) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const hasKey = Boolean(apiKey && apiKey.length > 10);
@@ -241,7 +245,7 @@ export default function GoogleMapsView({
     ? injectedProperties
     : storeProperties;
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
   const [center, setCenter] = useState(NAIROBI_CENTER);
   const [zoom, setZoom] = useState(12);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -251,7 +255,16 @@ export default function GoogleMapsView({
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const boundsRef = useRef<google.maps.LatLngBounds | null>(null);
 
+  const selectedId = selectedPropertyId !== undefined ? selectedPropertyId : internalSelectedId;
   const selected = useMemo(() => filtered.find(p => p.id === selectedId) || null, [filtered, selectedId]);
+
+  const handleSelectProperty = useCallback((propertyId: string | null) => {
+    const nextProperty = propertyId ? filtered.find((property) => property.id === propertyId) || null : null;
+    if (selectedPropertyId === undefined) {
+      setInternalSelectedId(propertyId);
+    }
+    onPropertySelect?.(nextProperty);
+  }, [filtered, onPropertySelect, selectedPropertyId]);
 
   // Fit bounds to filtered properties on first load / when filter changes
   const fitToProperties = useCallback((list: Property[]) => {
@@ -267,6 +280,15 @@ export default function GoogleMapsView({
     }
     boundsRef.current = bounds;
   }, [hasKey]);
+
+  useEffect(() => {
+    if (!selected || !mapRef.current || !isLoaded) return;
+    mapRef.current.panTo({ lat: selected.lat, lng: selected.lng });
+    const currentZoom = mapRef.current.getZoom();
+    if (typeof currentZoom === 'number' && currentZoom < 14) {
+      mapRef.current.setZoom(14);
+    }
+  }, [isLoaded, selected]);
 
   // Auto-fit when filtered list changes (debounced via effect)
   useEffect(() => {
@@ -325,7 +347,7 @@ export default function GoogleMapsView({
         <FallbackSvgMap
           properties={filtered}
           selectedId={selectedId}
-          onSelect={(p) => setSelectedId(p.id)}
+          onSelect={(p) => handleSelectProperty(p.id)}
         />
       </div>
     );
@@ -454,7 +476,7 @@ export default function GoogleMapsView({
               position={{ lat: p.lat, lng: p.lng }}
               icon={pinIcon(featured ? '#ef4444' : '#3b82f6', isSelected ? 1.25 : 1)}
               onClick={() => {
-                setSelectedId(p.id);
+                handleSelectProperty(p.id);
                 mapRef.current?.panTo({ lat: p.lat, lng: p.lng });
               }}
               title={p.title}
@@ -466,12 +488,12 @@ export default function GoogleMapsView({
         {selected && (
           <InfoWindow
             position={{ lat: selected.lat, lng: selected.lng }}
-            onCloseClick={() => setSelectedId(null)}
+            onCloseClick={() => handleSelectProperty(null)}
             options={{ pixelOffset: new google.maps.Size(0, -32) }}
           >
             <PropertyInfoWindow
               property={selected}
-              onClose={() => setSelectedId(null)}
+              onClose={() => handleSelectProperty(null)}
               onStartPurchase={handleStartPurchase}
             />
           </InfoWindow>

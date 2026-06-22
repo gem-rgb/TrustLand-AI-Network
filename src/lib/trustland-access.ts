@@ -16,6 +16,7 @@ export type SearchableProperty = {
   bathrooms?: number | null;
   yearBuilt?: number | null;
   trustScore?: number;
+  ownerDid?: string;
 };
 
 export type PropertySearchFilters = {
@@ -25,6 +26,7 @@ export type PropertySearchFilters = {
   city?: string;
   region?: string;
   status?: string;
+  ownerDid?: string;
   minPrice?: number | null;
   maxPrice?: number | null;
   bedrooms?: number | null;
@@ -195,21 +197,23 @@ export function filterProperties<T extends SearchableProperty>(properties: T[], 
   const city = filters.city?.trim() || '';
   const region = filters.region?.trim() || '';
   const status = filters.status?.trim() || '';
+  const ownerDid = filters.ownerDid?.trim() || '';
 
   return properties.filter((property) => {
     if (query && !matchesPropertyQuery(property, query)) return false;
     if (city && !property.city.toLowerCase().includes(city.toLowerCase())) return false;
     if (region && !property.region.toLowerCase().includes(region.toLowerCase())) return false;
+    if (ownerDid && property.ownerDid !== ownerDid) return false;
     const isVisibleListing = matchesPropertyStatus(property.status, 'For Sale') || matchesPropertyStatus(property.status, 'For Rent');
     if (!status && !isVisibleListing) return false;
     if (status && !matchesPropertyStatus(property.status, status)) return false;
     if (propertyTypes.length && !propertyTypes.some((type) => matchesPropertyType(property.propertyType, type))) return false;
     const askingPrice = property.askingPrice ?? 0;
     if (filters.minPrice != null && askingPrice < filters.minPrice) return false;
-  if (filters.maxPrice != null && askingPrice > filters.maxPrice) return false;
-  if (filters.bedrooms != null && (property.bedrooms ?? 0) < filters.bedrooms) return false;
-  if (filters.bathrooms != null && (property.bathrooms ?? 0) < filters.bathrooms) return false;
-  if (features.length) {
+    if (filters.maxPrice != null && askingPrice > filters.maxPrice) return false;
+    if (filters.bedrooms != null && (property.bedrooms ?? 0) < filters.bedrooms) return false;
+    if (filters.bathrooms != null && (property.bathrooms ?? 0) < filters.bathrooms) return false;
+    if (features.length) {
       const propertyFeatures = (property.features || []).map((feature) => feature.toLowerCase());
       if (!features.some((feature) => propertyFeatures.some((propertyFeature) => propertyFeature.includes(feature)))) {
         return false;

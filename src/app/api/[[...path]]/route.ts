@@ -603,7 +603,32 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
 
       case 'properties/search': {
-        const { query, propertyType, propertyTypes, city, region, status, minPrice, maxPrice, bedrooms, bathrooms, features, garage, garden, cond, sync, source } = body;
+        const {
+          query,
+          propertyType,
+          propertyTypes,
+          city,
+          region,
+          status,
+          ownerDid,
+          minPrice,
+          maxPrice,
+          bedrooms,
+          bathrooms,
+          features,
+          garage,
+          garden,
+          cond,
+          sync,
+          source,
+        } = body;
+        const headerOwnerDid = request.headers.get('x-trustland-user-did') || '';
+        const headerRole = request.headers.get('x-trustland-user-role') || '';
+        const scopedOwnerDid = headerRole === 'seller' && headerOwnerDid
+          ? headerOwnerDid
+          : typeof ownerDid === 'string' && ownerDid.trim()
+            ? ownerDid.trim()
+            : undefined;
         const searchCriteria = {
           query: query || city || region,
           propertyType,
@@ -611,6 +636,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           city,
           region,
           status,
+          ownerDid: scopedOwnerDid,
           minPrice: typeof minPrice === 'number' ? minPrice : minPrice ? Number(minPrice) : undefined,
           maxPrice: typeof maxPrice === 'number' ? maxPrice : maxPrice ? Number(maxPrice) : undefined,
           bedrooms: typeof bedrooms === 'number' ? bedrooms : bedrooms ? Number(bedrooms) : undefined,
@@ -628,7 +654,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             'system',
             'property_search_sync',
             'properties',
-            typeof query === 'string' && query.trim() ? query.trim() : propertyTypes?.[0] || propertyType || 'all',
+            typeof query === 'string' && query.trim() ? query.trim() : propertyTypes?.[0] || propertyType || (scopedOwnerDid ? 'seller listings' : 'all'),
             {
               ...searchCriteria,
               resultCount: results.length,

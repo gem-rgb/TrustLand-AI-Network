@@ -97,7 +97,7 @@ function createEmptyFilters(): Record<FilterKey, string[]> {
   };
 }
 
-function buildSearchRequest(query: string, activeFilters: Record<FilterKey, string[]>) {
+function buildSearchRequest(query: string, activeFilters: Record<FilterKey, string[]>, ownerDid?: string | null) {
   const body: Record<string, unknown> = {};
   const trimmedQuery = query.trim();
   const priceBand = activeFilters.price[0];
@@ -145,16 +145,31 @@ function buildSearchRequest(query: string, activeFilters: Record<FilterKey, stri
     if (bathCounts.length > 0) body.bathrooms = Math.min(...bathCounts);
   }
 
+  if (ownerDid) {
+    body.ownerDid = ownerDid;
+  }
+
   body.sync = Boolean(activeFilters.type.length && !trimmedQuery);
   body.source = 'explore-properties';
 
   return body;
 }
 
-function describeSearchScope(query: string, activeFilters: Record<FilterKey, string[]>) {
+function describeSearchScope(query: string, activeFilters: Record<FilterKey, string[]>, sellerScoped = false) {
+  if (sellerScoped) return 'your listings';
   if (activeFilters.type.length) return activeFilters.type.join(', ');
   if (query.trim()) return query.trim();
   return 'all available listings';
+}
+
+function formatListingStatus(status: string) {
+  return status
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 // ─── Property card on the right rail (compact category tiles like the demo) ─
@@ -220,7 +235,7 @@ function _PropertyPin({ property, onClick, isSelected }: { property: Property; o
 
 // ─── Main View ──────────────────────────────────────────────────────────────
 export default function PropertySearchView() {
-  const { properties, setCurrentView, fetchProperties, dashboardRole } = useTrustLandStore();
+  const { properties, setCurrentView, fetchProperties, dashboardRole, sessionIdentityDid } = useTrustLandStore();
   const [query, setQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<FilterKey, string[]>>(() => createEmptyFilters());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -229,6 +244,7 @@ export default function PropertySearchView() {
   const [searchResults, setSearchResults] = useState<Property[] | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchSync, setSearchSync] = useState<{ source: 'backend' | 'fallback'; total: number; syncedAt: string | null; scope: string } | null>(null);
+  const isSellerScoped = dashboardRole === 'seller' && Boolean(sessionIdentityDid);
 
   // Pull properties on mount if empty
   React.useEffect(() => {
@@ -261,20 +277,28 @@ export default function PropertySearchView() {
       garage: activeFilters.garage.length ? activeFilters.garage : undefined,
       garden: activeFilters.garden.length ? activeFilters.garden : undefined,
       cond: activeFilters.cond.length ? activeFilters.cond : undefined,
+      ownerDid: isSellerScoped ? sessionIdentityDid || undefined : undefined,
     });
-  }, [properties, query, activeFilters]);
+  }, [properties, query, activeFilters, isSellerScoped, sessionIdentityDid]);
 
   React.useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
       setSearchLoading(true);
-      const payload = buildSearchRequest(query, activeFilters);
-      const scope = describeSearchScope(query, activeFilters);
+      const payload = buildSearchRequest(query, activeFilters, isSellerScoped ? sessionIdentityDid : null);
+      const scope = describeSearchScope(query, activeFilters, isSellerScoped);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-trustland-user-role': dashboardRole,
+      };
+      if (sessionIdentityDid) {
+        headers['x-trustland-user-did'] = sessionIdentityDid;
+      }
       try {
         const res = await fetch('/api/properties/search', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error('search failed');
@@ -311,7 +335,7 @@ export default function PropertySearchView() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, activeFilters.type, activeFilters.status, activeFilters.rooms, activeFilters.baths, activeFilters.garage, activeFilters.garden, activeFilters.cond, activeFilters.feat, activeFilters.price, localFiltered]);
+  }, [query, activeFilters.type, activeFilters.status, activeFilters.rooms, activeFilters.baths, activeFilters.garage, activeFilters.garden, activeFilters.cond, activeFilters.feat, activeFilters.price, localFiltered, isSellerScoped, sessionIdentityDid, dashboardRole]);
 
   const filtered = searchResults ?? localFiltered;
   React.useEffect(() => {
@@ -327,7 +351,7 @@ export default function PropertySearchView() {
 
   const featuredCount = filtered.filter(p => p.trustScore >= 80).length;
   const newestCount = filtered.filter(p => Date.now() - new Date(p.createdAt).getTime() < 30 * 24 * 3600 * 1000).length;
-  const byType = (t: string) => properties.filter(p => (matchesPropertyStatus(p.status, 'For Sale') || matchesPropertyStatus(p.status, 'For Rent')) && matchesPropertyType(p.propertyType, t)).length;
+  const byType = (t: string) => filtered.filter(p => (matchesPropertyStatus(p.status, 'For Sale') || matchesPropertyStatus(p.status, 'For Rent')) && matchesPropertyType(p.propertyType, t)).length;
 
   const toggleFilter = (group: FilterKey, value: string) => {
     setActiveFilters(prev => {
@@ -360,6 +384,10 @@ export default function PropertySearchView() {
 
   const totalActive = Object.values(activeFilters).flat().length;
   const selected = filtered.find(p => p.id === selectedId) || null;
+  const railTitle = isSellerScoped ? 'Your Listings' : 'Matching Properties';
+  const railSubtitle = isSellerScoped
+    ? 'Only properties uploaded by your seller account appear here. Pick one to center the map.'
+    : 'These are the properties that match your current filters. Pick one to center the map.';
   const primaryAction = dashboardRole === 'buyer'
     ? { label: 'Open Buyer Tools', view: 'autonomous-purchase' as const }
     : dashboardRole === 'seller'
@@ -561,7 +589,12 @@ export default function PropertySearchView() {
         {/* CENTER — map (Google Maps renders its own top search + controls) */}
         <main className="flex-1 relative overflow-hidden bg-[#0a1f44] min-w-0">
           {/* Google Maps integration — falls back to stylized SVG if no API key set */}
-          <GoogleMapsView heightClass="absolute inset-0" properties={filtered} />
+          <GoogleMapsView
+            heightClass="absolute inset-0"
+            properties={filtered}
+            selectedPropertyId={selectedId}
+            onPropertySelect={(property) => setSelectedId(property?.id ?? null)}
+          />
 
           {/* Neighborhood legend (below the map's top search bar) */}
           <div className="absolute top-16 left-3 z-10 bg-black/40 backdrop-blur-sm rounded-lg p-2 border border-white/10 max-w-[180px] hidden lg:block">
@@ -613,9 +646,80 @@ export default function PropertySearchView() {
             )}
           </div>
 
+          <div className="p-4 border-b border-white/10">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">{railTitle}</h3>
+                <p className="text-[11px] text-white/50 mt-1">{railSubtitle}</p>
+              </div>
+              <Badge className="bg-orange-500/20 text-orange-200 border border-orange-500/20 text-[10px]">
+                {filtered.length}
+              </Badge>
+            </div>
+
+            <div className="mt-3 space-y-2 max-h-[20rem] overflow-y-auto pr-1">
+              {filtered.length > 0 ? (
+                filtered.slice(0, 12).map((property) => {
+                  const active = property.id === selectedId;
+                  return (
+                    <button
+                      key={property.id}
+                      type="button"
+                      onClick={() => setSelectedId(property.id)}
+                      className={cn(
+                        'w-full rounded-xl border p-3 text-left transition',
+                        active
+                          ? 'border-orange-500/50 bg-orange-500/10 shadow-lg shadow-orange-900/20'
+                          : 'border-white/10 bg-white/5 hover:bg-white/10'
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold leading-tight truncate">{property.title}</p>
+                          <p className="text-[11px] text-white/50 mt-1 truncate">{property.city}, {property.region}</p>
+                        </div>
+                        <Badge variant="outline" className="border-white/15 text-[10px] text-white/70 shrink-0">
+                          {formatListingStatus(property.status)}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-orange-300">
+                          {property.currency} {(property.askingPrice / 1_000_000).toFixed(2)}M
+                        </span>
+                        <span className="text-[10px] text-white/50">{property.propertyType}</span>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-white/60">
+                        {property.bedrooms != null && <span className="flex items-center gap-1"><Bed className="h-3 w-3" />{property.bedrooms}</span>}
+                        {property.bathrooms != null && <span className="flex items-center gap-1"><Bath className="h-3 w-3" />{property.bathrooms}</span>}
+                        <span className="flex items-center gap-1"><Shield className="h-3 w-3" />Trust {property.trustScore}%</span>
+                        {isSellerScoped && property.ownerDid === sessionIdentityDid && (
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] text-emerald-200 border border-emerald-500/20">
+                            Owned by you
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="rounded-xl border border-dashed border-white/15 bg-white/5 p-4 text-center">
+                  <MapPinIcon className="h-6 w-6 text-white/30 mx-auto mb-2" />
+                  <p className="text-sm font-medium">No properties match these filters</p>
+                  <p className="text-[11px] text-white/50 mt-1">Try relaxing the filters or clear the current search.</p>
+                </div>
+              )}
+            </div>
+
+            {filtered.length > 12 && (
+              <p className="mt-2 text-[10px] text-white/40">Showing 12 of {filtered.length} results.</p>
+            )}
+          </div>
+
           <div className="p-4">
-            <h3 className="text-sm font-semibold mb-1">Explore Properties</h3>
-            <p className="text-[11px] text-white/50 mb-3">Browse by category across the TrustLand network</p>
+            <h3 className="text-sm font-semibold mb-1">Quick Filters</h3>
+            <p className="text-[11px] text-white/50 mb-3">Use these to narrow the result rail.</p>
             <div className="grid grid-cols-2 gap-2">
               <CategoryCard
                 label="Apartments"

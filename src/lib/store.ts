@@ -168,6 +168,27 @@ export interface Property {
   lat: number;
   lng: number;
   createdAt: string;
+  updatedAt?: string | null;
+  archivedAt?: string | null;
+}
+
+export interface PropertyUpdateRequest {
+  title?: string;
+  address?: string;
+  city?: string;
+  region?: string;
+  propertyType?: string;
+  area?: number;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  yearBuilt?: number | null;
+  askingPrice?: number;
+  currency?: string;
+  description?: string;
+  features?: string[];
+  lat?: number;
+  lng?: number;
+  status?: string;
 }
 
 export interface Transaction {
@@ -557,6 +578,8 @@ interface TrustLandStore {
   fetchIdentities: () => Promise<void>;
   fetchAgents: () => Promise<void>;
   fetchProperties: () => Promise<void>;
+  updateProperty: (propertyId: string, updates: PropertyUpdateRequest) => Promise<void>;
+  deleteProperty: (propertyId: string) => Promise<void>;
   fetchTransactions: () => Promise<void>;
   fetchTrustLedger: () => Promise<void>;
   fetchDocuments: () => Promise<void>;
@@ -861,6 +884,41 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       const data = await apiFetch('/properties');
       set({ properties: data });
     } catch (e) { console.error('Failed to fetch properties:', e); }
+  },
+
+  updateProperty: async (propertyId: string, updates: PropertyUpdateRequest) => {
+    try {
+      set({ isLoading: true });
+      await apiFetch(`/properties/${encodeURIComponent(propertyId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      await get().fetchProperties();
+      await get().fetchTrustLedger();
+    } catch (e) {
+      console.error('Failed to update property:', e);
+      throw e;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  deleteProperty: async (propertyId: string) => {
+    try {
+      set({ isLoading: true });
+      await apiFetch(`/properties/${encodeURIComponent(propertyId)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await get().fetchProperties();
+      await get().fetchTrustLedger();
+    } catch (e) {
+      console.error('Failed to delete property:', e);
+      throw e;
+    } finally {
+      set({ isLoading: false });
+    }
   },
 
   fetchTransactions: async () => {

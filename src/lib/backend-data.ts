@@ -86,6 +86,8 @@ export interface Property {
   lat: number;
   lng: number;
   createdAt: string;
+  updatedAt?: string | null;
+  archivedAt?: string | null;
 }
 
 export interface Transaction {

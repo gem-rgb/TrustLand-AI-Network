@@ -302,6 +302,43 @@ export const useTrustLandStore = create((set, get) => ({
             console.error('Failed to fetch properties:', e);
         }
     },
+    updateProperty: async (propertyId, updates) => {
+        try {
+            set({ isLoading: true });
+            await apiFetch(`/properties/${encodeURIComponent(propertyId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates),
+            });
+            await get().fetchProperties();
+            await get().fetchTrustLedger();
+        }
+        catch (e) {
+            console.error('Failed to update property:', e);
+            throw e;
+        }
+        finally {
+            set({ isLoading: false });
+        }
+    },
+    deleteProperty: async (propertyId) => {
+        try {
+            set({ isLoading: true });
+            await apiFetch(`/properties/${encodeURIComponent(propertyId)}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            await get().fetchProperties();
+            await get().fetchTrustLedger();
+        }
+        catch (e) {
+            console.error('Failed to delete property:', e);
+            throw e;
+        }
+        finally {
+            set({ isLoading: false });
+        }
+    },
     fetchTransactions: async () => {
         try {
             const data = await apiFetch('/transactions');
