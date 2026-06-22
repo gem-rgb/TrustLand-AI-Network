@@ -383,6 +383,8 @@ interface TrustLandStore {
   // Navigation
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
+  isAuthenticated: boolean;
+  setIsAuthenticated: (authenticated: boolean) => void;
 
   // Data
   identities: T3Identity[];
@@ -498,8 +500,12 @@ async function apiFetch(path: string, options?: RequestInit, retries = 2): Promi
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
-  currentView: 'overview',
-  setCurrentView: (view) => set({ currentView: view }),
+  currentView: 'auth',
+  setCurrentView: (view) => set(state => ({
+    currentView: !state.isAuthenticated && view !== 'auth' ? 'auth' : view,
+  })),
+  isAuthenticated: false,
+  setIsAuthenticated: (authenticated) => set({ isAuthenticated: authenticated }),
 
   identities: [],
   agents: [],

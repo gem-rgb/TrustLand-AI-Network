@@ -32,7 +32,7 @@ const CREDENTIAL_TYPES = [
 type Mode = 'login' | 'register';
 
 export default function AuthView() {
-  const { identities, fetchIdentities, setCurrentView } = useTrustLandStore();
+  const { identities, fetchIdentities, setCurrentView, setIsAuthenticated } = useTrustLandStore();
   const [mode, setMode] = useState<Mode>('register');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +90,8 @@ export default function AuthView() {
       const data = await res.json();
       await fetchIdentities();
       setIssuedIdentity(data.identity);
+      setIsAuthenticated(true);
+      setCurrentView('auth');
       toast.success('Identity verified & T3 credential issued');
     } catch (err: any) {
       setError(err.message || 'Registration failed');
@@ -118,6 +120,8 @@ export default function AuthView() {
         throw new Error('No TrustLand identity matches that DID or email');
       }
       setIssuedIdentity(found);
+      setIsAuthenticated(true);
+      setCurrentView('auth');
       toast.success(`Welcome back, ${found.profile.name}`);
     } catch (err: any) {
       setError(err.message || 'Login failed');
@@ -221,17 +225,17 @@ export default function AuthView() {
           <div className="flex gap-3 mt-6">
             <Button
               className="flex-1 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 border-0"
-              onClick={() => setCurrentView('overview')}
+              onClick={() => setCurrentView('dashboard')}
             >
               <Sparkles className="h-4 w-4 mr-2" />
-              Explore Properties
+              Open Dashboard
             </Button>
             <Button
               variant="outline"
               className="flex-1 bg-white/5 border-white/20 text-white hover:bg-white/10"
-              onClick={() => setCurrentView('identities')}
+              onClick={() => setCurrentView('overview')}
             >
-              View All Identities
+              Browse Properties
             </Button>
           </div>
 
@@ -261,7 +265,7 @@ export default function AuthView() {
             </div>
           </div>
           <h1 className="text-2xl font-bold">TrustLand AI Network</h1>
-          <p className="text-sm text-white/60 mt-1">Intelligent Decisions, Seamless Transactions.</p>
+          <p className="text-sm text-white/60 mt-1">Authenticate first to unlock the full TrustLand platform.</p>
         </div>
 
         {/* Mode toggle */}

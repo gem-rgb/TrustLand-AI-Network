@@ -26,7 +26,6 @@ import AiParcelUpload from './AiParcelUpload';
 
 const NAV_ITEMS: Array<{ view: ViewType; label: string; icon: React.ReactNode; badge?: string }> = [
   { view: 'overview', label: 'Explore Properties', icon: <Shield className="h-4 w-4" /> },
-  { view: 'auth', label: 'Verify / Sign In', icon: <Lock className="h-4 w-4" /> },
   { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
   { view: 'analytics', label: 'Analytics', icon: <Activity className="h-4 w-4" /> },
   { view: 'agents', label: 'Agent Marketplace', icon: <Bot className="h-4 w-4" /> },
@@ -67,7 +66,7 @@ class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, {
 }
 
 export default function TrustLandLayout() {
-  const { currentView, setCurrentView, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, dashboardStats, addLiveActivity } = useTrustLandStore();
+  const { currentView, setCurrentView, isAuthenticated, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, dashboardStats, addLiveActivity } = useTrustLandStore();
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const socketRef = useRef<Socket | null>(null);
 
@@ -156,6 +155,22 @@ export default function TrustLandLayout() {
     }
   };
 
+  if (!isAuthenticated) {
+    return (
+      <ViewErrorBoundary>
+        <AuthView />
+      </ViewErrorBoundary>
+    );
+  }
+
+  if (currentView === 'auth') {
+    return (
+      <ViewErrorBoundary>
+        <AuthView />
+      </ViewErrorBoundary>
+    );
+  }
+
   // The property search landing view is a full-screen map experience
   // (no left sidebar, dark blue hero) — render it standalone, outside
   // the sidebar shell, so it matches the TrustLand product demo layout.
@@ -163,15 +178,6 @@ export default function TrustLandLayout() {
     return (
       <ViewErrorBoundary>
         <PropertySearchView />
-      </ViewErrorBoundary>
-    );
-  }
-
-  // The Auth/Verification view is also a full-screen flow outside the sidebar.
-  if (currentView === 'auth') {
-    return (
-      <ViewErrorBoundary>
-        <AuthView />
       </ViewErrorBoundary>
     );
   }
@@ -255,7 +261,6 @@ export default function TrustLandLayout() {
 
 // ─── Overview / Hero View (legacy — kept for reference, replaced by PropertySearchView) ───
 // @deprecated Use PropertySearchView as the default landing experience.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function OverviewView() {
   const { setCurrentView, dashboardStats } = useTrustLandStore();
 
