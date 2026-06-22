@@ -29,8 +29,6 @@ export interface T3AuthenticatedAgent {
   scopes: string[];
   apiKey: string;
   keyPair: Ed25519KeyPair;
-  /** The real @agent-auth/sdk AgentAuth client instance */
-  sdkClient: AgentAuth;
   accessToken: string | null;
   refreshToken: string | null;
   tokenExpiresAt: number | null;
@@ -107,6 +105,14 @@ class T3SDKClientManager {
       `[T3 SDK] Bootstrap: createAgentAuth() → AgentAuth instance created ` +
       `(issuer=${issuerUrl}, instanceof AgentAuth=${testClient instanceof AgentAuth})`
     );
+  }
+
+  private createSdkClient(agent: Pick<T3AuthenticatedAgent, 'apiKey' | 'scopes'>): AgentAuth {
+    return createAgentAuth({
+      issuer: this.issuerUrl,
+      apiKey: agent.apiKey,
+      scopes: agent.scopes,
+    });
   }
 
   /**
@@ -200,7 +206,6 @@ class T3SDKClientManager {
       scopes,
       apiKey,
       keyPair: agentKeyPair,
-      sdkClient,
       accessToken: null,
       refreshToken: null,
       tokenExpiresAt: null,
@@ -231,7 +236,8 @@ class T3SDKClientManager {
     try {
       console.log(`[T3 SDK] authenticateAgent(${agentId}) → calling loginWithApiKey()...`);
 
-      const tokenResponse = await agent.sdkClient.loginWithApiKey(agent.apiKey, agent.scopes);
+      const sdkClient = this.createSdkClient(agent);
+      const tokenResponse = await sdkClient.loginWithApiKey(agent.apiKey, agent.scopes);
 
       // Store the tokens from the SDK response
       agent.accessToken = tokenResponse.access_token;
@@ -294,7 +300,8 @@ class T3SDKClientManager {
 
     // ─── PRIMARY: Use SDK's getToken() which auto-refreshes ─────────────
     try {
-      const token = await agent.sdkClient.getToken();
+      const sdkClient = this.createSdkClient(agent);
+      const token = await sdkClient.getToken();
       if (token) {
         agent.accessToken = token;
         this.sdkOperationsCount++;
@@ -318,7 +325,8 @@ class T3SDKClientManager {
     // ─── PRIMARY: Use SDK's fetch() with auto-token attachment ──────────
     try {
       this.sdkOperationsCount++;
-      return await agent.sdkClient.fetch(path, init);
+      const sdkClient = this.createSdkClient(agent);
+      return await sdkClient.fetch(path, init);
     } catch (error) {
       console.error(`[T3 SDK] fetch() failed for agent ${agentId}:`, error);
       return null;

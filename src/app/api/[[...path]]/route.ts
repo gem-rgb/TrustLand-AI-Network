@@ -3,15 +3,12 @@
 // All agent actions are authenticated via T3 Agent Auth
 
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeData, data, getDashboardStats, getTrustScore, advanceWorkflow, uploadDocument, sendMessage, delegateAuthority, verifyLedger, createPropertyVerification, getPropertyVerifications, getPropertyVerification, generateDueDiligenceReport, getDueDiligenceReports, calculateTrustScore, getTrustProfile, getAllTrustProfiles, updateTrustScoreOnEvent, advanceTransactionStage, getTransactionEvents, getTransactionHistory, assignAgentToWorkflow, getAgentActivity, addAuditLedgerEntry, verifyAuditLedger, searchAuditLedger, exportAuditLedger, getAnalyticsMetrics, TRANSACTION_STAGES } from '@/lib/backend-data';
 import { deriveDashboardRole, filterProperties } from '@/lib/trustland-access';
-import { t3AutonomousPurchase } from '@/lib/t3-autonomous-purchase';
-import { generateEd25519KeyPair, generateT3Did, signEd25519, hashData } from '@/lib/t3-crypto';
-import { t3SDKClient } from '@/lib/t3-sdk-client';
-import { t3TEE } from '@/lib/t3-tee';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // Initialize data on first request
-initializeData();
 
 // ─── T3 Agent Auth Middleware ─────────────────────────────────────────────────
 
@@ -26,6 +23,7 @@ async function verifyT3Auth(request: NextRequest): Promise<{ authenticated: bool
   }
 
   const token = authHeader.replace('Bearer ', '');
+  const { t3SDKClient } = await import('@/lib/t3-sdk-client');
   const result = await t3SDKClient.verifyToken(token);
   if (!result.valid) {
     return { authenticated: false };
@@ -41,6 +39,31 @@ async function verifyT3Auth(request: NextRequest): Promise<{ authenticated: bool
 export async function GET(request: NextRequest, { params }: { params: Promise<{ path?: string[] }> }) {
   const { path } = await params;
   const pathStr = (path || []).join('/');
+  const backend = await import('@/lib/backend-data');
+  backend.initializeData();
+  const {
+    data,
+    getDashboardStats,
+    getTrustScore,
+    verifyLedger,
+    getPropertyVerifications,
+    getPropertyVerification,
+    getDueDiligenceReports,
+    getAllTrustProfiles,
+    getTrustProfile,
+    getTransactionEvents,
+    getTransactionHistory,
+    getAgentActivity,
+    searchAuditLedger,
+    exportAuditLedger,
+    getAnalyticsMetrics,
+    verifyAuditLedger,
+    TRANSACTION_STAGES,
+  } = backend;
+  const { t3AutonomousPurchase } = await import('@/lib/t3-autonomous-purchase');
+  const { generateEd25519KeyPair, generateT3Did, signEd25519, hashData } = await import('@/lib/t3-crypto');
+  const { t3SDKClient } = await import('@/lib/t3-sdk-client');
+  const { t3TEE } = await import('@/lib/t3-tee');
 
   try {
     let result: unknown;
@@ -371,6 +394,42 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ path?: string[] }> }) {
   const { path } = await params;
   const pathStr = (path || []).join('/');
+  const backend = await import('@/lib/backend-data');
+  backend.initializeData();
+  const {
+    data,
+    getDashboardStats,
+    getTrustScore,
+    advanceWorkflow,
+    uploadDocument,
+    sendMessage,
+    delegateAuthority,
+    verifyLedger,
+    createPropertyVerification,
+    getPropertyVerifications,
+    getPropertyVerification,
+    generateDueDiligenceReport,
+    getDueDiligenceReports,
+    calculateTrustScore,
+    getTrustProfile,
+    getAllTrustProfiles,
+    updateTrustScoreOnEvent,
+    advanceTransactionStage,
+    getTransactionEvents,
+    getTransactionHistory,
+    assignAgentToWorkflow,
+    getAgentActivity,
+    addAuditLedgerEntry,
+    verifyAuditLedger,
+    searchAuditLedger,
+    exportAuditLedger,
+    getAnalyticsMetrics,
+    TRANSACTION_STAGES,
+  } = backend;
+  const { t3AutonomousPurchase } = await import('@/lib/t3-autonomous-purchase');
+  const { generateEd25519KeyPair, generateT3Did, signEd25519, hashData } = await import('@/lib/t3-crypto');
+  const { t3SDKClient } = await import('@/lib/t3-sdk-client');
+  const { t3TEE } = await import('@/lib/t3-tee');
 
   try {
     const body = await request.json();

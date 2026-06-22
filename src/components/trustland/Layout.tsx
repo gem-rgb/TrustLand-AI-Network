@@ -25,23 +25,23 @@ import PropertySearchView from './PropertySearchView';
 import AuthView from './AuthView';
 import AiParcelUpload from './AiParcelUpload';
 
-type NavItem = { view: ViewType; label: string; icon: React.ReactNode; badge?: string; roles: DashboardRole[] };
+type NavItem = { view: ViewType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string; roles: DashboardRole[] };
 
 const NAV_ITEMS: Array<NavItem> = [
-  { view: 'overview', label: 'Explore Properties', icon: <Shield className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
-  { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
-  { view: 'analytics', label: 'Analytics', icon: <Activity className="h-4 w-4" />, roles: ['admin'] },
-  { view: 'agents', label: 'Agent Marketplace', icon: <Bot className="h-4 w-4" />, roles: ['admin'] },
-  { view: 'ledger', label: 'Trust Ledger', icon: <BookOpen className="h-4 w-4" />, roles: ['admin'] },
-  { view: 'audit-ledger', label: 'Audit Ledger', icon: <FileText className="h-4 w-4" />, roles: ['admin'] },
-  { view: 'transactions', label: 'Transactions', icon: <ArrowRightLeft className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
-  { view: 'diligence', label: 'Due Diligence', icon: <FileSearch className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
-  { view: 'trust-score', label: 'Trust Scores', icon: <Star className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
-  { view: 'trust-engine', label: 'Trust Engine', icon: <Zap className="h-4 w-4" />, badge: 'NEW', roles: ['admin'] },
-  { view: 'messages', label: 'Messages', icon: <MessageSquare className="h-4 w-4" />, roles: ['admin', 'buyer', 'seller'] },
-  { view: 'identities', label: 'Identities', icon: <Users className="h-4 w-4" />, roles: ['admin'] },
-  { view: 'verification', label: 'Verification', icon: <ClipboardCheck className="h-4 w-4" />, roles: ['admin'] },
-  { view: 'autonomous-purchase', label: 'Autonomous Purchase', icon: <Zap className="h-4 w-4" />, badge: 'T3', roles: ['buyer'] },
+  { view: 'overview', label: 'Explore Properties', icon: Shield, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'analytics', label: 'Analytics', icon: Activity, roles: ['admin'] },
+  { view: 'agents', label: 'Agent Marketplace', icon: Bot, roles: ['admin'] },
+  { view: 'ledger', label: 'Trust Ledger', icon: BookOpen, roles: ['admin'] },
+  { view: 'audit-ledger', label: 'Audit Ledger', icon: FileText, roles: ['admin'] },
+  { view: 'transactions', label: 'Transactions', icon: ArrowRightLeft, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'diligence', label: 'Due Diligence', icon: FileSearch, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'trust-score', label: 'Trust Scores', icon: Star, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'trust-engine', label: 'Trust Engine', icon: Zap, badge: 'NEW', roles: ['admin'] },
+  { view: 'messages', label: 'Messages', icon: MessageSquare, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'identities', label: 'Identities', icon: Users, roles: ['admin'] },
+  { view: 'verification', label: 'Verification', icon: ClipboardCheck, roles: ['admin'] },
+  { view: 'autonomous-purchase', label: 'Autonomous Purchase', icon: Zap, badge: 'T3', roles: ['buyer'] },
 ];
 
 // ─── Error Boundary ──────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ export default function TrustLandLayout() {
                 )}
                 onClick={() => setCurrentView(item.view)}
               >
-                {item.icon}
+                <item.icon className="h-4 w-4" />
                 {sidebarOpen && <span>{item.view === 'dashboard' ? getDashboardRoleLabel(dashboardRole) : item.label}</span>}
                 {sidebarOpen && item.badge && <Badge variant="secondary" className="ml-auto text-[10px] bg-orange-500 text-white border-0">{item.badge}</Badge>}
               </Button>
