@@ -388,7 +388,7 @@ class AutonomousPurchaseEngine {
     delegation.status = 'completed';
 
     // Build recommendation
-    let recommendation = null;
+    let recommendation: AutonomousPurchaseResult['recommendation'] = null;
     if (selectedProperty) {
       const matchScore = this.calculateMatchScore(selectedProperty, delegation.criteria);
       const riskLevel = (100 - selectedProperty.trustScore) / 2 < 20 ? 'low' : 'medium';

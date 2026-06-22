@@ -3,8 +3,10 @@
 // Provides: discovery, token exchange, refresh, introspection, JWKS
 // Each agent authenticates via @agent-auth/sdk against this server
 
-import { SignJWT, jwtVerify, exportJWK, importJWK, type JWK, type KeyLike } from 'jose';
+import { SignJWT, jwtVerify, exportJWK, importJWK, type JWK } from 'jose';
 import { generateEd25519KeyPair, hashData, generateApiKey, type Ed25519KeyPair } from './t3-crypto';
+
+type JoseKeyLike = Awaited<ReturnType<typeof importJWK>>;
 
 // ─── Jose Key Conversion Helpers ──────────────────────────────────────────────
 // jose v5+ requires CryptoKey/KeyObject/JWK for EdDSA — raw Uint8Array is rejected.
@@ -111,9 +113,9 @@ export interface T3VerifiableCredential {
 class T3AgentAuthServer {
   private serverKeyPair: Ed25519KeyPair;
   /** Jose-compatible private key (KeyObject) for signing JWTs */
-  private serverPrivateKey: KeyLike | Uint8Array;
+  private serverPrivateKey: Uint8Array;
   /** Jose-compatible public key (KeyObject) for verifying JWTs */
-  private serverPublicKey: KeyLike | Uint8Array;
+  private serverPublicKey: Uint8Array;
   /** The JWK form of the public key, returned by the JWKS endpoint */
   private serverPublicJWK: JWK;
   private registeredAgents: Map<string, T3AgentRegistration> = new Map();
@@ -136,16 +138,16 @@ class T3AgentAuthServer {
    * Lazily import the server private key as a jose KeyObject.
    * jose v5+ rejects raw Uint8Array for EdDSA — must be CryptoKey/KeyObject/JWK.
    */
-  private async getSigningKey(): Promise<KeyLike> {
+  private async getSigningKey(): Promise<JoseKeyLike> {
     const privateJWK = ed25519KeyPairToPrivateJWK(this.serverKeyPair);
-    return await importJWK(privateJWK) as KeyLike;
+    return await importJWK(privateJWK) as JoseKeyLike;
   }
 
   /**
    * Lazily import the server public key as a jose KeyObject for verification.
    */
-  private async getVerificationKey(): Promise<KeyLike> {
-    return await importJWK(this.serverPublicJWK) as KeyLike;
+  private async getVerificationKey(): Promise<JoseKeyLike> {
+    return await importJWK(this.serverPublicJWK) as JoseKeyLike;
   }
 
   // ─── Discovery Endpoint ──────────────────────────────────────────────────

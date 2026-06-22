@@ -338,13 +338,14 @@ export interface TransactionEvent {
 export interface AuditLedgerEntry {
   id: string;
   actorId: string;           // DID of the actor
-  actorType: 'user' | 'agent' | 'system';
+  actorType: 'user' | 'seller' | 'agent' | 'system';
   action: string;            // login, verification, property_creation, transaction_update, agent_action, document_upload
   resourceType: string;      // identity, property, transaction, agent, document, verification
   resourceId: string;
   metadata: Record<string, unknown>;
   hash: string;              // SHA-256 hash of this entry
   previousHash: string | null;  // Hash of previous entry (chain)
+  blockNumber: number;
   timestamp: string;
   // ── T3 Integration ──
   signature: string;
@@ -1472,7 +1473,7 @@ export function updateTrustScoreOnEvent(eventType: string, entityId: string, ent
   // Add to audit ledger
   addAuditLedgerEntry(
     entityId,
-    entityType === 'property' ? 'system' : entityType,
+    entityType === 'property' ? 'system' : entityType === 'seller' ? 'user' : entityType,
     'trust_score_update',
     'trust_profile',
     data.trustProfiles.find(p => p.entityId === entityId)?.id || entityId,
@@ -1648,6 +1649,7 @@ export function addAuditLedgerEntry(
     metadata,
     hash,
     previousHash,
+    blockNumber: data.auditLedgerBlockNumber + 1,
     timestamp: new Date().toISOString(),
     signature,
     signatureType: 'Ed25519Signature2020',
