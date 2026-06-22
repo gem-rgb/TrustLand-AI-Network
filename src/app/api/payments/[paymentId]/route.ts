@@ -19,14 +19,15 @@ function handleError(error: unknown) {
   return NextResponse.json({ error: 'Unable to fetch payment status' }, { status: 500 });
 }
 
-function readPaymentId(params: { paymentId: string }) {
-  return params.paymentId?.trim() || '';
+async function readPaymentId(params: Promise<{ paymentId: string }>) {
+  const resolved = await params;
+  return resolved.paymentId?.trim() || '';
 }
 
-export async function GET(request: Request, context: { params: { paymentId: string } }) {
+export async function GET(request: Request, context: { params: Promise<{ paymentId: string }> }) {
   try {
     const session = getPaymentSessionFromHeaders(request.headers);
-    const paymentId = readPaymentId(context.params);
+    const paymentId = await readPaymentId(context.params);
     if (!paymentId) {
       throw new TrustLandPaymentError('Payment ID is required', 400);
     }
@@ -38,9 +39,9 @@ export async function GET(request: Request, context: { params: { paymentId: stri
   }
 }
 
-async function confirmDemoPayment(request: Request, context: { params: { paymentId: string } }) {
+async function confirmDemoPayment(request: Request, context: { params: Promise<{ paymentId: string }> }) {
   const session = getPaymentSessionFromHeaders(request.headers);
-  const paymentId = readPaymentId(context.params);
+  const paymentId = await readPaymentId(context.params);
   if (!paymentId) {
     throw new TrustLandPaymentError('Payment ID is required', 400);
   }
@@ -54,7 +55,7 @@ async function confirmDemoPayment(request: Request, context: { params: { payment
   return NextResponse.json(getPaymentStatusResponse(paymentId, session));
 }
 
-export async function PATCH(request: Request, context: { params: { paymentId: string } }) {
+export async function PATCH(request: Request, context: { params: Promise<{ paymentId: string }> }) {
   try {
     return await confirmDemoPayment(request, context);
   } catch (error) {
@@ -62,7 +63,7 @@ export async function PATCH(request: Request, context: { params: { paymentId: st
   }
 }
 
-export async function POST(request: Request, context: { params: { paymentId: string } }) {
+export async function POST(request: Request, context: { params: Promise<{ paymentId: string }> }) {
   try {
     return await confirmDemoPayment(request, context);
   } catch (error) {

@@ -160,7 +160,12 @@ export default function TrustLandLayout() {
       case 'dashboard': return <DashboardView />;
       case 'agents': return <AgentMarketplace />;
       case 'ledger': return <TrustLedgerView />;
-      case 'transactions': return <TransactionWorkflow />;
+      case 'transactions':
+        return dashboardRole === 'buyer'
+          ? <AutonomousPurchaseView />
+          : dashboardRole === 'seller'
+            ? <SellerWithdrawalView />
+            : <FinanceDashboardView />;
       case 'finance': return <FinanceDashboardView />;
       case 'withdrawals': return <SellerWithdrawalView />;
       case 'diligence': return <DueDiligenceView />;
