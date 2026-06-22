@@ -5,6 +5,7 @@
 
 import { signEd25519, hashData, type Ed25519KeyPair } from './t3-crypto';
 import t3AgentAuthServer from './t3-agent-auth';
+import type { PaymentPurpose } from './payment-types';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,14 @@ export interface AutonomousPurchaseResult {
 }
 
 // ─── Autonomous Purchase Engine ──────────────────────────────────────────────
+
+export interface PaymentWorkflowDirective {
+  nextRequiredWorkflowStep: string | null;
+  approvalRequired: boolean;
+  reserveParcel: boolean;
+  advanceToSettlement: boolean;
+  ownershipTransferAllowed: boolean;
+}
 
 class AutonomousPurchaseEngine {
   private delegations: Map<string, AutonomousDelegation> = new Map();
@@ -470,6 +479,80 @@ class AutonomousPurchaseEngine {
 }
 
 // ─── Singleton ────────────────────────────────────────────────────────────────
+
+const PAYMENT_WORKFLOW_DIRECTIVES: Record<PaymentPurpose, PaymentWorkflowDirective> = {
+  verification_fee: {
+    nextRequiredWorkflowStep: 'due_diligence',
+    approvalRequired: false,
+    reserveParcel: false,
+    advanceToSettlement: false,
+    ownershipTransferAllowed: false,
+  },
+  due_diligence_fee: {
+    nextRequiredWorkflowStep: 'legal_review',
+    approvalRequired: false,
+    reserveParcel: false,
+    advanceToSettlement: false,
+    ownershipTransferAllowed: false,
+  },
+  reservation_deposit: {
+    nextRequiredWorkflowStep: 'approval',
+    approvalRequired: true,
+    reserveParcel: true,
+    advanceToSettlement: false,
+    ownershipTransferAllowed: false,
+  },
+  escrow_funding: {
+    nextRequiredWorkflowStep: 'transfer',
+    approvalRequired: true,
+    reserveParcel: false,
+    advanceToSettlement: false,
+    ownershipTransferAllowed: false,
+  },
+  service_fee: {
+    nextRequiredWorkflowStep: 'finance_review',
+    approvalRequired: false,
+    reserveParcel: false,
+    advanceToSettlement: false,
+    ownershipTransferAllowed: false,
+  },
+  purchase_settlement: {
+    nextRequiredWorkflowStep: 'transfer',
+    approvalRequired: true,
+    reserveParcel: false,
+    advanceToSettlement: true,
+    ownershipTransferAllowed: true,
+  },
+};
+
+export function getPaymentWorkflowDirective(paymentPurpose: PaymentPurpose): PaymentWorkflowDirective {
+  return PAYMENT_WORKFLOW_DIRECTIVES[paymentPurpose];
+}
+
+export function canAdvanceWorkflowAfterPayment(params: {
+  paymentPurpose: PaymentPurpose;
+  hasVerifiedIdentity: boolean;
+  hasCompletedDueDiligence: boolean;
+  hasLegalApproval: boolean;
+  hasEscrowFunding: boolean;
+}) {
+  if (!params.hasVerifiedIdentity) return false;
+
+  switch (params.paymentPurpose) {
+    case 'verification_fee':
+    case 'due_diligence_fee':
+    case 'service_fee':
+      return true;
+    case 'reservation_deposit':
+      return params.hasCompletedDueDiligence || params.hasLegalApproval;
+    case 'escrow_funding':
+      return params.hasCompletedDueDiligence && params.hasLegalApproval;
+    case 'purchase_settlement':
+      return params.hasCompletedDueDiligence && params.hasLegalApproval && params.hasEscrowFunding;
+    default:
+      return false;
+  }
+}
 
 const globalForPurchase = globalThis as unknown as { __t3_autonomous_purchase: AutonomousPurchaseEngine | undefined };
 export const t3AutonomousPurchase = globalForPurchase.__t3_autonomous_purchase || new AutonomousPurchaseEngine();

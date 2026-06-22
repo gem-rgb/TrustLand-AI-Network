@@ -2,6 +2,13 @@
 // Updated with Terminal 3 Agent Auth SDK integration
 import { create } from 'zustand';
 import { canAccessView, deriveDashboardRole, type DashboardRole, type KycStatus } from './trustland-access';
+import type {
+  PaymentCreateIntentRequest,
+  PaymentCreateIntentResponse,
+  PaymentDashboardStats,
+  PaymentRecord,
+  PaymentStatusResponse,
+} from './payment-types';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -12,6 +19,8 @@ export type ViewType =
   | 'agents'
   | 'ledger'
   | 'transactions'
+  | 'finance'
+  | 'withdrawals'
   | 'diligence'
   | 'trust-score'
   | 'messages'
@@ -30,6 +39,8 @@ const AUTH_VIEW_TYPES = new Set<ViewType>([
   'agents',
   'ledger',
   'transactions',
+  'finance',
+  'withdrawals',
   'diligence',
   'trust-score',
   'messages',
@@ -492,6 +503,8 @@ interface TrustLandStore {
   messages: AgentMessage[];
   attestations: TrustAttestation[];
   dashboardStats: DashboardStats | null;
+  payments: PaymentRecord[];
+  paymentDashboardStats: PaymentDashboardStats | null;
 
   // Autonomous Purchase State
   autonomousDelegations: AutonomousDelegation[];
@@ -522,6 +535,8 @@ interface TrustLandStore {
   selectedPropertyId: string | null;
   selectedTransactionId: string | null;
   selectedAgentId: string | null;
+  selectedPaymentId: string | null;
+  selectedPaymentStatus: PaymentStatusResponse | null;
 
   // Loading states
   isLoading: boolean;
@@ -541,6 +556,8 @@ interface TrustLandStore {
   fetchRiskReports: () => Promise<void>;
   fetchMessages: () => Promise<void>;
   fetchAttestations: () => Promise<void>;
+  fetchPayments: (filters?: Record<string, string>) => Promise<void>;
+  fetchPaymentStatus: (paymentId: string) => Promise<PaymentStatusResponse | null>;
   fetchTransactionDetail: (id: string) => Promise<void>;
   fetchTrustScore: (did: string) => Promise<TrustScoreBreakdown | null>;
   advanceWorkflow: (workflowId: string, stepIndex: number) => Promise<void>;
@@ -554,6 +571,8 @@ interface TrustLandStore {
   createAutonomousDelegation: (granterDid: string, granterName: string, criteria: Record<string, unknown>) => Promise<void>;
   executeAutonomousPurchase: (delegationId: string) => Promise<void>;
   fetchAutonomousDelegations: () => Promise<void>;
+  createPaymentIntent: (request: PaymentCreateIntentRequest) => Promise<PaymentCreateIntentResponse>;
+  confirmDemoPayment: (paymentId: string) => Promise<PaymentRecord>;
 
   // New actions
   fetchTrustProfiles: () => Promise<void>;
@@ -573,11 +592,36 @@ interface TrustLandStore {
 
 const API_BASE = '/api';
 
+function buildAuthHeaders() {
+  if (typeof window === 'undefined') return {};
+
+  const session = useTrustLandStore.getState();
+  if (!session.isAuthenticated) return {};
+
+  const headers: Record<string, string> = {
+    'x-trustland-user-role': session.dashboardRole,
+    'x-trustland-kyc-status': session.sessionKycStatus,
+  };
+
+  if (session.sessionIdentityDid) {
+    headers['x-trustland-user-did'] = session.sessionIdentityDid;
+  }
+
+  if (session.sessionDisplayName) {
+    headers['x-trustland-user-name'] = session.sessionDisplayName;
+  }
+
+  return headers;
+}
+
 async function apiFetch(path: string, options?: RequestInit, retries = 2): Promise<any> {
   const url = `${API_BASE}${path}`;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(url, options);
+      const headers = new Headers(options?.headers || {});
+      const authHeaders = buildAuthHeaders();
+      Object.entries(authHeaders).forEach(([key, value]) => headers.set(key, value));
+      const response = await fetch(url, { ...options, headers });
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
       return response.json();
     } catch (err) {
@@ -589,6 +633,12 @@ async function apiFetch(path: string, options?: RequestInit, retries = 2): Promi
     }
   }
   throw new Error('Unreachable');
+}
+
+function upsertPaymentRecord(payments: PaymentRecord[], payment: PaymentRecord) {
+  const nextPayments = [...payments.filter((item) => item.id !== payment.id), payment];
+  nextPayments.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return nextPayments;
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -635,6 +685,10 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       sessionDisplayName: string | null;
       sessionKycStatus: KycStatus;
       currentView: ViewType;
+      selectedPaymentId: string | null;
+      selectedPaymentStatus: PaymentStatusResponse | null;
+      payments: PaymentRecord[];
+      paymentDashboardStats: PaymentDashboardStats | null;
     } = {
       isAuthenticated: authenticated,
       dashboardRole,
@@ -642,6 +696,10 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       sessionDisplayName: authenticated ? (session.displayName ?? state.sessionDisplayName) : null,
       sessionKycStatus: authenticated ? (session.kycStatus ?? state.sessionKycStatus) : 'unverified',
       currentView,
+      selectedPaymentId: authenticated ? state.selectedPaymentId : null,
+      selectedPaymentStatus: authenticated ? state.selectedPaymentStatus : null,
+      payments: authenticated ? state.payments : [],
+      paymentDashboardStats: authenticated ? state.paymentDashboardStats : null,
     };
     writeAuthSession({
       currentView: nextState.currentView,
@@ -667,6 +725,10 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       sessionIdentityDid: string | null;
       sessionDisplayName: string | null;
       sessionKycStatus: KycStatus;
+      selectedPaymentId: string | null;
+      selectedPaymentStatus: PaymentStatusResponse | null;
+      payments: PaymentRecord[];
+      paymentDashboardStats: PaymentDashboardStats | null;
     } = {
       isAuthenticated: authenticated,
       currentView,
@@ -674,6 +736,10 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       sessionIdentityDid: authenticated ? state.sessionIdentityDid : null,
       sessionDisplayName: authenticated ? state.sessionDisplayName : null,
       sessionKycStatus: authenticated ? state.sessionKycStatus : 'unverified',
+      selectedPaymentId: authenticated ? state.selectedPaymentId : null,
+      selectedPaymentStatus: authenticated ? state.selectedPaymentStatus : null,
+      payments: authenticated ? state.payments : [],
+      paymentDashboardStats: authenticated ? state.paymentDashboardStats : null,
     };
     writeAuthSession({
       currentView,
@@ -719,6 +785,10 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       sessionIdentityDid: null,
       sessionDisplayName: null,
       sessionKycStatus: 'unverified',
+      payments: [],
+      paymentDashboardStats: null,
+      selectedPaymentId: null,
+      selectedPaymentStatus: null,
     });
   },
 
@@ -733,6 +803,8 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
   messages: [],
   attestations: [],
   dashboardStats: null,
+  payments: [],
+  paymentDashboardStats: null,
 
   autonomousDelegations: [],
   currentDelegationId: null,
@@ -749,6 +821,8 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
   selectedPropertyId: null,
   selectedTransactionId: null,
   selectedAgentId: null,
+  selectedPaymentId: null,
+  selectedPaymentStatus: null,
 
   isLoading: false,
   lastLedgerEntry: null,
@@ -822,6 +896,39 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       const data = await apiFetch('/attestations');
       set({ attestations: data });
     } catch (e) { console.error('Failed to fetch attestations:', e); }
+  },
+
+  fetchPayments: async (filters?: Record<string, string>) => {
+    try {
+      const params = filters ? '?' + new URLSearchParams(filters).toString() : '';
+      const data = await apiFetch(`/payments${params}`);
+      if (Array.isArray(data)) {
+        set({ payments: data });
+        return;
+      }
+
+      if (data?.payments) {
+        set({ payments: data.payments, paymentDashboardStats: data.stats || null });
+        return;
+      }
+
+      set({ payments: [], paymentDashboardStats: null });
+    } catch (e) { console.error('Failed to fetch payments:', e); }
+  },
+
+  fetchPaymentStatus: async (paymentId: string) => {
+    try {
+      const data = await apiFetch(`/payments/${encodeURIComponent(paymentId)}`);
+      set((state) => ({
+        payments: data?.payment ? upsertPaymentRecord(state.payments, data.payment) : state.payments,
+        selectedPaymentId: paymentId,
+        selectedPaymentStatus: data || null,
+      }));
+      return data || null;
+    } catch (e) {
+      console.error('Failed to fetch payment status:', e);
+      return null;
+    }
   },
 
   fetchTransactionDetail: async (id: string) => {
@@ -929,6 +1036,33 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       const data = await apiFetch('/t3/autonomous/delegations');
       set({ autonomousDelegations: data });
     } catch (e) { console.error('Failed to fetch autonomous delegations:', e); }
+  },
+
+  createPaymentIntent: async (request: PaymentCreateIntentRequest) => {
+    const response = await apiFetch('/payments/create-intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }, 0);
+    set((state) => ({
+      payments: response?.payment ? upsertPaymentRecord(state.payments, response.payment) : state.payments,
+      selectedPaymentId: response?.payment?.id ?? state.selectedPaymentId,
+    }));
+    return response;
+  },
+
+  confirmDemoPayment: async (paymentId: string) => {
+    const response = await apiFetch(`/payments/${encodeURIComponent(paymentId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'confirm-demo' }),
+    }, 0);
+    set((state) => ({
+      payments: response?.payment ? upsertPaymentRecord(state.payments, response.payment) : state.payments,
+      selectedPaymentId: response?.payment?.id ?? state.selectedPaymentId,
+      selectedPaymentStatus: response || null,
+    }));
+    return response?.payment;
   },
 
   setLastLedgerEntry: (entry) => set({ lastLedgerEntry: entry }),

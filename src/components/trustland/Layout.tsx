@@ -9,7 +9,7 @@ import {
   Shield, LayoutDashboard, Bot, BookOpen, ArrowRightLeft,
   FileSearch, Star, MessageSquare, Users, Activity,
   ChevronRight, Lock, LogOut, Zap, CheckCircle2, Key, Fingerprint, Loader2,
-  ClipboardCheck, AlertTriangle, Clock, Eye, Plus, FileText, Home, Building2, ShoppingCart, Sparkles
+  ClipboardCheck, AlertTriangle, Clock, Eye, Plus, FileText, Home, Building2, ShoppingCart, Sparkles, Banknote, HandCoins
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,9 @@ import { cn } from '@/lib/utils';
 import PropertySearchView from './PropertySearchView';
 import AuthView from './AuthView';
 import AiParcelUpload from './AiParcelUpload';
+import FinanceDashboardView from './FinanceDashboardView';
+import SellerWithdrawalView from './SellerWithdrawalView';
+import TransactionPaymentView from './TransactionPaymentView';
 
 type NavItem = { view: ViewType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: string; roles: DashboardRole[] };
 
@@ -34,7 +37,8 @@ const NAV_ITEMS: Array<NavItem> = [
   { view: 'agents', label: 'Agent Marketplace', icon: Bot, roles: ['admin'] },
   { view: 'ledger', label: 'Trust Ledger', icon: BookOpen, roles: ['admin'] },
   { view: 'audit-ledger', label: 'Audit Ledger', icon: FileText, roles: ['admin'] },
-  { view: 'transactions', label: 'Transactions', icon: ArrowRightLeft, roles: ['admin', 'buyer', 'seller'] },
+  { view: 'finance', label: 'Finance', icon: Banknote, roles: ['admin'] },
+  { view: 'withdrawals', label: 'Withdrawals', icon: HandCoins, roles: ['seller'] },
   { view: 'diligence', label: 'Due Diligence', icon: FileSearch, roles: ['admin', 'buyer', 'seller'] },
   { view: 'trust-score', label: 'Trust Scores', icon: Star, roles: ['admin', 'buyer', 'seller'] },
   { view: 'trust-engine', label: 'Trust Engine', icon: Zap, badge: 'NEW', roles: ['admin'] },
@@ -69,7 +73,7 @@ class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, {
 }
 
 export default function TrustLandLayout() {
-  const { currentView, setCurrentView, isAuthenticated, dashboardRole, restoreAuthSession, logout, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, dashboardStats, addLiveActivity } = useTrustLandStore();
+  const { currentView, setCurrentView, isAuthenticated, dashboardRole, restoreAuthSession, logout, fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, fetchPayments, dashboardStats, addLiveActivity } = useTrustLandStore();
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const socketRef = useRef<Socket | null>(null);
 
@@ -78,7 +82,7 @@ export default function TrustLandLayout() {
     const fetchers = [
       fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties,
       fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages,
-      fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages,
+      fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchPayments,
       fetchTrustProfiles,
     ];
     // Stagger in batches of 3 to avoid overloading the server
@@ -86,7 +90,7 @@ export default function TrustLandLayout() {
       const batch = fetchers.slice(i, i + 3);
       await Promise.all(batch.map(fn => fn()));
     }
-  }, [fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles]);
+  }, [fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties, fetchTransactions, fetchTrustLedger, fetchDocuments, fetchMessages, fetchAttestations, fetchAuditLedger, fetchAnalytics, fetchTransactionStages, fetchTrustProfiles, fetchPayments]);
 
   useEffect(() => {
     restoreAuthSession();
@@ -157,6 +161,8 @@ export default function TrustLandLayout() {
       case 'agents': return <AgentMarketplace />;
       case 'ledger': return <TrustLedgerView />;
       case 'transactions': return <TransactionWorkflow />;
+      case 'finance': return <FinanceDashboardView />;
+      case 'withdrawals': return <SellerWithdrawalView />;
       case 'diligence': return <DueDiligenceView />;
       case 'trust-score': return <TrustScoreView />;
       case 'messages': return <MessagesView />;
@@ -322,8 +328,8 @@ function OverviewView() {
             <Button size="lg" className="bg-gradient-to-r from-orange-500 to-amber-400 text-white hover:from-orange-400 hover:to-amber-300" onClick={() => setCurrentView('dashboard')}>
               <LayoutDashboard className="mr-2 h-5 w-5" /> Open Dashboard
             </Button>
-            <Button size="lg" variant="outline" className="border-emerald-400 text-emerald-100 hover:bg-emerald-800" onClick={() => setCurrentView('transactions')}>
-              <ArrowRightLeft className="mr-2 h-5 w-5" /> View Transaction
+            <Button size="lg" variant="outline" className="border-emerald-400 text-emerald-100 hover:bg-emerald-800" onClick={() => setCurrentView('autonomous-purchase')}>
+              <ShoppingCart className="mr-2 h-5 w-5" /> Open Purchase Flow
             </Button>
           </div>
         </div>
@@ -686,8 +692,8 @@ function BuyerDashboardView() {
               <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('overview')}>
                 <Home className="h-4 w-4 mr-2" /> Open Properties
               </Button>
-              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('transactions')}>
-                <ArrowRightLeft className="h-4 w-4 mr-2" /> View Transactions
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('autonomous-purchase')}>
+                <ShoppingCart className="h-4 w-4 mr-2" /> Open Purchase Flow
               </Button>
               <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('messages')}>
                 <MessageSquare className="h-4 w-4 mr-2" /> Open Messages
@@ -858,15 +864,15 @@ function SellerDashboardView() {
                 <h3 className="text-lg font-semibold">Sales Workflow</h3>
                 <p className="text-sm text-white/60">Restricted to seller-facing actions and deal management</p>
               </div>
-              <Button size="sm" variant="outline" onClick={() => setCurrentView('transactions')} className="bg-white/5 border-white/15 text-white hover:bg-white/10">
-                <ArrowRightLeft className="h-4 w-4 mr-2" /> Open Deals
+              <Button size="sm" variant="outline" onClick={() => setCurrentView('withdrawals')} className="bg-white/5 border-white/15 text-white hover:bg-white/10">
+                <Banknote className="h-4 w-4 mr-2" /> Open Withdrawals
               </Button>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
               {[
                 { title: 'Publish', description: 'Create or update a property listing with AI-assisted extraction.', view: 'dashboard' as const },
                 { title: 'Negotiate', description: 'Review offers, buyer messages, and transaction status.', view: 'messages' as const },
-                { title: 'Close', description: 'Track due diligence and final transfer progress.', view: 'transactions' as const },
+                { title: 'Withdraw', description: 'Track verified payouts and settlement progress.', view: 'withdrawals' as const },
               ].map(step => (
                 <div key={step.title} className="rounded-xl border border-white/10 bg-white/5 p-4">
                   <p className="text-sm font-semibold">{step.title}</p>
@@ -893,8 +899,8 @@ function SellerDashboardView() {
               <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('messages')}>
                 <MessageSquare className="h-4 w-4 mr-2" /> Buyer Messages
               </Button>
-              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('transactions')}>
-                <ArrowRightLeft className="h-4 w-4 mr-2" /> Transaction Tracker
+              <Button className="w-full justify-start bg-white/5 border border-white/10 text-white hover:bg-white/10" variant="outline" onClick={() => setCurrentView('withdrawals')}>
+                <Banknote className="h-4 w-4 mr-2" /> Withdrawal Tracker
               </Button>
             </div>
           </div>
@@ -3159,6 +3165,21 @@ function AutonomousPurchaseView() {
                   {autonomousResult.allActionsSigned && ' ✓ All signatures verified'}
                 </span>
               </div>
+            </div>
+          )}
+
+          {autonomousResult?.recommended && delegationId && (
+            <div className="space-y-4">
+              <TransactionPaymentView
+                parcelId={autonomousResult.propertyId}
+                transactionId={delegationId}
+                defaultPaymentPurpose="reservation_deposit"
+                onVerified={() => {
+                  toast.success('Payment verified by TrustLand', {
+                    description: 'The autonomous purchase workflow can continue once the server verification completes.',
+                  });
+                }}
+              />
             </div>
           )}
 

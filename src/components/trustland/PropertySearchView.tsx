@@ -13,7 +13,7 @@ import {
   SlidersHorizontal, Layers, Locate, Compass, Calendar,
   Bed, Bath, Car, TreePine, Wrench, DollarSign, Tag,
   TrendingUp, Sparkles, ArrowRight, Shield, ChevronRight,
-  Loader2,
+  Loader2, Banknote, HandCoins,
 } from 'lucide-react';
 import { useTrustLandStore, type Property } from '@/lib/store';
 import { Input } from '@/components/ui/input';
@@ -715,7 +715,8 @@ export default function PropertySearchView() {
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               {canAccessView(dashboardRole, 'agents') && <button onClick={() => setCurrentView('agents')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Agents</button>}
               {canAccessView(dashboardRole, 'ledger') && <button onClick={() => setCurrentView('ledger')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Trust Ledger</button>}
-              {canAccessView(dashboardRole, 'transactions') && <button onClick={() => setCurrentView('transactions')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Transactions</button>}
+              {canAccessView(dashboardRole, 'finance') && <button onClick={() => setCurrentView('finance')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Finance</button>}
+              {canAccessView(dashboardRole, 'withdrawals') && <button onClick={() => setCurrentView('withdrawals')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Withdrawals</button>}
               {canAccessView(dashboardRole, 'diligence') && <button onClick={() => setCurrentView('diligence')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Due Diligence</button>}
               {canAccessView(dashboardRole, 'autonomous-purchase') && <button onClick={() => setCurrentView('autonomous-purchase')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Autonomous Purchase</button>}
               {canAccessView(dashboardRole, 'messages') && <button onClick={() => setCurrentView('messages')} className="flex items-center gap-1 text-white/70 hover:text-white"><ChevronRight className="h-3 w-3" />Messages</button>}
@@ -748,12 +749,30 @@ export default function PropertySearchView() {
                 <Sparkles className="h-3.5 w-3.5" /> Autonomous Purchase
               </button>
             )}
-            <button
-              onClick={() => setCurrentView('transactions')}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"
-            >
-              <ArrowRight className="h-3.5 w-3.5" /> Transactions
-            </button>
+            {canAccessView(dashboardRole, 'finance') && (
+              <button
+                onClick={() => setCurrentView('finance')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <Banknote className="h-3.5 w-3.5" /> Finance
+              </button>
+            )}
+            {canAccessView(dashboardRole, 'withdrawals') && (
+              <button
+                onClick={() => setCurrentView('withdrawals')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <HandCoins className="h-3.5 w-3.5" /> Withdrawals
+              </button>
+            )}
+            {canAccessView(dashboardRole, 'autonomous-purchase') && (
+              <button
+                onClick={() => setCurrentView('autonomous-purchase')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Purchase
+              </button>
+            )}
           </div>
           <span className="text-white/40 hidden md:block">TrustLand Properties · Nairobi Metro Network</span>
         </div>

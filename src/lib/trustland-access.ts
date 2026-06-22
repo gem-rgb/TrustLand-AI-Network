@@ -42,6 +42,7 @@ const ROLE_VIEW_ACCESS: Record<DashboardRole, Set<string>> = {
     'agents',
     'ledger',
     'transactions',
+    'finance',
     'diligence',
     'trust-score',
     'messages',
@@ -54,7 +55,6 @@ const ROLE_VIEW_ACCESS: Record<DashboardRole, Set<string>> = {
   buyer: new Set([
     'overview',
     'dashboard',
-    'transactions',
     'diligence',
     'trust-score',
     'messages',
@@ -63,10 +63,10 @@ const ROLE_VIEW_ACCESS: Record<DashboardRole, Set<string>> = {
   seller: new Set([
     'overview',
     'dashboard',
-    'transactions',
     'diligence',
     'trust-score',
     'messages',
+    'withdrawals',
   ]),
 };
 
