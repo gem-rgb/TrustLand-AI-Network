@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   experimental: {
+    webpackBuildWorker: false,
     workerThreads: true,
     cpus: 1,
   },
