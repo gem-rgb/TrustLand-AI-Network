@@ -59,12 +59,14 @@ function PaymentForm({
   onVerified,
   onProcessing,
   onError,
+  onPaymentSettled,
 }: {
   paymentId: string;
   paymentResponse: PaymentCreateIntentResponse;
   onVerified: (result: PaymentStatusResponse) => void;
   onProcessing: (message: string) => void;
   onError: (message: string) => void;
+  onPaymentSettled: () => Promise<void>;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -81,6 +83,7 @@ function PaymentForm({
       }
 
       if (status.payment.status === 'paid') {
+        await onPaymentSettled();
         onVerified(status);
         return;
       }
@@ -95,7 +98,7 @@ function PaymentForm({
     }
 
     onProcessing('Payment submitted. TrustLand will keep checking for webhook verification.');
-  }, [fetchPaymentStatus, onError, onProcessing, onVerified, paymentId]);
+  }, [fetchPaymentStatus, onError, onPaymentSettled, onProcessing, onVerified, paymentId]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -177,11 +180,13 @@ function DemoPaymentPanel({
   onConfirm,
   onProcessing,
   onError,
+  onPaymentSettled,
 }: {
   paymentResponse: PaymentCreateIntentResponse;
   onConfirm: () => Promise<void>;
   onProcessing: (message: string) => void;
   onError: (message: string) => void;
+  onPaymentSettled: () => Promise<void>;
 }) {
   const [isConfirming, setIsConfirming] = React.useState(false);
 
@@ -190,6 +195,7 @@ function DemoPaymentPanel({
     try {
       onProcessing('Simulated payment verified. Updating TrustLand state...');
       await onConfirm();
+      await onPaymentSettled();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to confirm demo payment';
       onError(message);
@@ -233,7 +239,7 @@ export default function PaymentCheckout({
   description,
   onVerified,
 }: PaymentCheckoutProps) {
-  const { createPaymentIntent, confirmDemoPayment, fetchPaymentStatus } = useTrustLandStore();
+  const { createPaymentIntent, confirmDemoPayment, fetchPaymentStatus, fetchTransactions } = useTrustLandStore();
   const transactionRef = React.useRef<string>(transactionId || crypto.randomUUID());
   const [checkoutState, setCheckoutState] = React.useState<'creating' | 'ready' | 'processing' | 'verified' | 'failed'>('creating');
   const [checkoutError, setCheckoutError] = React.useState<string | null>(null);
@@ -296,6 +302,10 @@ export default function PaymentCheckout({
     }
     return result;
   }, [fetchPaymentStatus, onVerified, paymentResponse]);
+
+  const refreshWorkflowState = React.useCallback(async () => {
+    await fetchTransactions();
+  }, [fetchTransactions]);
 
   React.useEffect(() => {
     if (!paymentResponse?.payment.id || paymentResponse.demoMode || checkoutState !== 'processing') {
@@ -421,6 +431,7 @@ export default function PaymentCheckout({
                 setCheckoutError(message);
                 setCheckoutState('failed');
               }}
+              onPaymentSettled={refreshWorkflowState}
             />
           ) : stripePromise && paymentResponse.clientSecret ? (
             <Elements
@@ -447,6 +458,7 @@ export default function PaymentCheckout({
                   setCheckoutError(message);
                   setCheckoutState('failed');
                 }}
+                onPaymentSettled={refreshWorkflowState}
               />
             </Elements>
           ) : (
