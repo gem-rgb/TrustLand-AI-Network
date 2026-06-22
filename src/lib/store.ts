@@ -7,6 +7,7 @@ import type {
   PaymentCreateIntentResponse,
   PaymentDashboardStats,
   PaymentRecord,
+  PaymentPurpose,
   PaymentStatusResponse,
 } from './payment-types';
 
@@ -521,6 +522,12 @@ interface TrustLandStore {
     reasoning: string[];
     totalStepsCompleted: number;
     allActionsSigned: boolean;
+    transactionId: string | null;
+    workflowTransactionId: string | null;
+    workflowStatus: string | null;
+    nextRequiredWorkflowStep: string | null;
+    paymentPurpose: PaymentPurpose | null;
+    paymentRequired: boolean;
   } | null;
 
   // New data
@@ -1024,9 +1031,19 @@ export const useTrustLandStore = create<TrustLandStore>((set, get) => ({
       });
       set({
         autonomousSteps: result.steps || [],
-        autonomousResult: result.recommendation || null,
+        autonomousResult: result.recommendation ? {
+          ...result.recommendation,
+          transactionId: result.transactionId || null,
+          workflowTransactionId: result.workflowTransactionId || result.transactionId || null,
+          workflowStatus: result.workflowStatus || null,
+          nextRequiredWorkflowStep: result.nextRequiredWorkflowStep || null,
+          paymentPurpose: result.paymentPurpose || null,
+          paymentRequired: Boolean(result.paymentRequired),
+        } : null,
+        selectedTransactionId: result.transactionId || null,
         isLoading: false,
       });
+      await get().fetchTransactions();
       await get().fetchTrustLedger();
     } catch (e) { console.error('Failed to execute autonomous purchase:', e); set({ isLoading: false }); }
   },

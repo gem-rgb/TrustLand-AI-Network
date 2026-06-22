@@ -2,8 +2,9 @@
 // The "Wow" Feature: Delegated Authority for Autonomous Property Purchase
 // User grants authority → Agent searches → Verifies → Creates recommendation
 // Every action is signed and auditable via Terminal 3 Agent Auth
-import { signEd25519, hashData } from './t3-crypto';
-import t3AgentAuthServer from './t3-agent-auth';
+import { signEd25519, hashData } from './t3-crypto.js';
+import t3AgentAuthServer from './t3-agent-auth.js';
+import { addAuditLedgerEntry, advanceTransactionStage, data, TRANSACTION_STAGES } from './backend-data.js';
 class AutonomousPurchaseEngine {
     constructor() {
         this.delegations = new Map();
@@ -51,6 +52,10 @@ class AutonomousPurchaseEngine {
             signature,
             createdAt: new Date().toISOString(),
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+            transactionId: null,
+            workflowStatus: null,
+            nextRequiredWorkflowStep: null,
+            paymentPurpose: null,
         };
         this.delegations.set(id, delegation);
         // Create the 7-step autonomous workflow
@@ -169,6 +174,12 @@ class AutonomousPurchaseEngine {
         delegation.status = 'executing';
         let accessTokenJti = '';
         let selectedProperty = matchingProperties.length > 0 ? matchingProperties[0] : null;
+        let transaction = null;
+        let workflowTransactionId = null;
+        let workflowStatus = null;
+        let nextRequiredWorkflowStep = null;
+        let paymentPurpose = null;
+        let paymentRequired = false;
         // Execute each step
         for (let i = 0; i < steps.length; i++) {
             const step = steps[i];
@@ -279,7 +290,6 @@ class AutonomousPurchaseEngine {
             step.status = step.status === 'failed' ? 'failed' : 'completed';
             step.completedAt = new Date().toISOString();
         }
-        delegation.status = 'completed';
         // Build recommendation
         let recommendation = null;
         if (selectedProperty) {
@@ -298,9 +308,43 @@ class AutonomousPurchaseEngine {
                 allActionsSigned: steps.every(s => s.signature !== null),
             };
         }
+        const propertyRecord = selectedProperty
+            ? data.properties.find((property) => property.id === selectedProperty.id) || null
+            : null;
+        if (selectedProperty && recommendation?.recommended && propertyRecord) {
+            transaction = this.createAutonomousPurchaseTransaction(delegation, propertyRecord, recommendation);
+            workflowTransactionId = transaction.id;
+            const stagedTransaction = this.advanceAutonomousPurchaseTransaction(transaction.id, 'financing', delegation.granterDid, 'Autonomous purchase progressed to financing and is awaiting reservation deposit verification');
+            workflowStatus = stagedTransaction?.status || transaction.status;
+            const directive = getPaymentWorkflowDirective('reservation_deposit');
+            nextRequiredWorkflowStep = directive.nextRequiredWorkflowStep;
+            paymentPurpose = 'reservation_deposit';
+            paymentRequired = Boolean(stagedTransaction && stagedTransaction.status === 'financing');
+            delegation.transactionId = transaction.id;
+            delegation.workflowStatus = workflowStatus;
+            delegation.nextRequiredWorkflowStep = nextRequiredWorkflowStep;
+            delegation.paymentPurpose = paymentPurpose;
+            addAuditLedgerEntry(delegation.granterDid, 'user', 'autonomous_purchase_ready_for_payment', 'transaction', transaction.id, {
+                delegationId: delegation.id,
+                propertyId: propertyRecord.id,
+                buyerDid: delegation.granterDid,
+                sellerDid: propertyRecord.ownerDid,
+                workflowStatus,
+                paymentPurpose,
+                nextRequiredWorkflowStep,
+                autonomousPurchase: true,
+            });
+        }
+        delegation.status = transaction ? 'awaiting_payment' : 'completed';
         return {
             delegation,
             steps,
+            transactionId: transaction?.id || null,
+            workflowTransactionId: workflowTransactionId || transaction?.id || null,
+            workflowStatus,
+            nextRequiredWorkflowStep,
+            paymentPurpose,
+            paymentRequired,
             recommendation,
         };
     }
@@ -340,6 +384,148 @@ class AutonomousPurchaseEngine {
         reasons.push('All actions authenticated via Terminal 3 Agent Auth SDK');
         reasons.push('Every step signed with Ed25519 and recorded in verifiable Trust Ledger');
         return reasons;
+    }
+    createAutonomousPurchaseWorkflow(transaction, delegation, property, recommendation) {
+        const existing = data.workflows.find((workflow) => workflow.transactionId === transaction.id);
+        if (existing)
+            return existing;
+        const workflowId = crypto.randomUUID();
+        const now = new Date().toISOString();
+        const activeStageIndex = Math.max(0, TRANSACTION_STAGES.findIndex((stage) => stage.key === transaction.status));
+        const workflow = {
+            id: workflowId,
+            transactionId: transaction.id,
+            workflowType: 'autonomous_purchase',
+            definition: {
+                type: 'autonomous_purchase',
+                version: '1.0',
+                t3Integrated: true,
+                delegationId: delegation.id,
+            },
+            currentState: transaction.status,
+            context: {
+                autonomousPurchase: true,
+                delegationId: delegation.id,
+                propertyId: property.id,
+                buyerDid: delegation.granterDid,
+                sellerDid: property.ownerDid,
+                agentDid: delegation.agentId,
+                criteria: delegation.criteria,
+                recommendation: {
+                    propertyId: property.id,
+                    propertyTitle: property.title,
+                    matchScore: recommendation.matchScore,
+                    riskLevel: recommendation.riskLevel,
+                    trustScore: recommendation.trustScore,
+                    priceVsMarket: recommendation.priceVsMarket,
+                    recommended: recommendation.recommended,
+                },
+                transactionStatus: transaction.status,
+                nextRequiredWorkflowStep: getPaymentWorkflowDirective('reservation_deposit').nextRequiredWorkflowStep,
+            },
+            status: 'active',
+            steps: TRANSACTION_STAGES.map((stage, index) => ({
+                id: crypto.randomUUID(),
+                workflowId,
+                agentId: delegation.agentId,
+                stepType: stage.key,
+                stepOrder: stage.order,
+                stepName: stage.label,
+                description: `Autonomous purchase stage: ${stage.label}`,
+                status: index < activeStageIndex ? 'completed' : index === activeStageIndex ? 'active' : 'pending',
+                startedAt: index <= activeStageIndex ? now : null,
+                completedAt: index < activeStageIndex ? now : null,
+                signature: null,
+                signatureType: 'Ed25519Signature2020',
+                t3AccessTokenJti: index <= activeStageIndex ? `t3jti_auto_${transaction.id}_${stage.key}` : undefined,
+                outputData: index < activeStageIndex
+                    ? { stage: stage.key, autonomous: true, completed: true }
+                    : index === activeStageIndex
+                        ? { stage: stage.key, autonomous: true, active: true }
+                        : null,
+            })),
+            startedAt: now,
+            completedAt: null,
+        };
+        data.workflows.push(workflow);
+        return workflow;
+    }
+    createAutonomousPurchaseTransaction(delegation, property, recommendation) {
+        const existing = data.transactions.find((tx) => tx.propertyId === property.id
+            && tx.buyerDid === delegation.granterDid
+            && tx.sellerDid === property.ownerDid
+            && tx.status !== 'completed'
+            && tx.status !== 'failed'
+            && tx.status !== 'cancelled');
+        if (existing) {
+            if (!data.workflows.find((workflow) => workflow.transactionId === existing.id)) {
+                this.createAutonomousPurchaseWorkflow(existing, delegation, property, recommendation);
+            }
+            return existing;
+        }
+        const now = new Date().toISOString();
+        const buyerAgent = data.agents.find((agent) => agent.agentType === 'buyer');
+        const sellerAgent = data.agents.find((agent) => agent.agentType === 'seller');
+        const transaction = {
+            id: crypto.randomUUID(),
+            propertyId: property.id,
+            buyerDid: delegation.granterDid,
+            sellerDid: property.ownerDid,
+            buyerAgentId: buyerAgent?.id || '',
+            sellerAgentId: sellerAgent?.id || '',
+            amount: property.askingPrice,
+            currency: property.currency,
+            status: 'draft',
+            currentStep: 1,
+            totalSteps: TRANSACTION_STAGES.length,
+            riskLevel: recommendation.riskLevel,
+            createdAt: now,
+            updatedAt: now,
+        };
+        data.transactions.push(transaction);
+        addAuditLedgerEntry(delegation.granterDid, 'user', 'autonomous_purchase_created', 'transaction', transaction.id, {
+            delegationId: delegation.id,
+            propertyId: property.id,
+            buyerDid: delegation.granterDid,
+            sellerDid: property.ownerDid,
+            agentDid: delegation.agentDid,
+            amount: transaction.amount,
+            currency: transaction.currency,
+            matchScore: recommendation.matchScore,
+            trustScore: recommendation.trustScore,
+            recommended: recommendation.recommended,
+            criteria: delegation.criteria,
+            autonomousPurchase: true,
+        });
+        this.createAutonomousPurchaseWorkflow(transaction, delegation, property, recommendation);
+        return transaction;
+    }
+    advanceAutonomousPurchaseTransaction(transactionId, targetStage, actorDid, notes) {
+        const stageOrder = TRANSACTION_STAGES.map((stage) => stage.key);
+        const targetIndex = stageOrder.indexOf(targetStage);
+        if (targetIndex === -1) {
+            return data.transactions.find((tx) => tx.id === transactionId) || null;
+        }
+        let current = data.transactions.find((tx) => tx.id === transactionId) || null;
+        let safety = 0;
+        while (current) {
+            const currentIndex = stageOrder.indexOf(current.status);
+            if (currentIndex === -1 || currentIndex >= targetIndex) {
+                break;
+            }
+            const previousStatus = current.status;
+            const advanced = advanceTransactionStage(transactionId, actorDid, notes);
+            if (!advanced || advanced.status === previousStatus) {
+                current = advanced || current;
+                break;
+            }
+            current = advanced;
+            safety += 1;
+            if (safety > stageOrder.length + 1) {
+                break;
+            }
+        }
+        return current;
     }
     getDelegation(id) {
         return this.delegations.get(id);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import Stripe from 'stripe';
+import { generateEd25519KeyPair, generateT3Did } from '../src/lib/t3-crypto';
 
 type LoadedModules = {
   backend: typeof import('../src/lib/backend-data');
@@ -174,6 +175,64 @@ test('verifies Stripe webhook signatures before processing', async () => {
 
   const event = stripe.webhooks.constructEvent(payload, validSignature, 'whsec_test_123');
   assert.equal(event.type, 'payment_intent.succeeded');
+});
+
+test('autonomous purchase execution creates a backend transaction and advances workflow state', async () => {
+  const { backend, autonomous } = await loadModules();
+  const buyerKeyPair = generateEd25519KeyPair();
+  const agentKeyPair = generateEd25519KeyPair();
+  const granterDid = generateT3Did(buyerKeyPair.publicKeyBase64);
+  const agentDid = generateT3Did(agentKeyPair.publicKeyBase64);
+  const criteria = {
+    propertyType: 'agricultural',
+    maxPrice: 50000,
+    location: 'Nakuru',
+  };
+
+  const delegation = autonomous.t3AutonomousPurchase.createDelegation(
+    granterDid,
+    'Autonomous Buyer',
+    'test-agent-autonomous',
+    agentDid,
+    criteria,
+    buyerKeyPair
+  );
+
+  const matchingProperty = backend.data.properties
+    .find((property) => property.propertyType === 'agricultural' && property.city === 'Nakuru' && property.askingPrice <= 50000);
+
+  assert.ok(matchingProperty);
+
+  const result = await autonomous.t3AutonomousPurchase.executeAutonomousPurchase(
+    delegation.id,
+    [{
+      id: matchingProperty!.id,
+      title: matchingProperty!.title,
+      askingPrice: matchingProperty!.askingPrice,
+      trustScore: matchingProperty!.trustScore,
+      city: matchingProperty!.city,
+      propertyType: matchingProperty!.propertyType,
+      features: matchingProperty!.features,
+    }],
+    agentKeyPair
+  );
+
+  assert.ok(result.transactionId);
+  assert.equal(result.workflowStatus, 'financing');
+  assert.equal(result.paymentRequired, true);
+  assert.equal(result.nextRequiredWorkflowStep, 'approval');
+
+  const transaction = backend.data.transactions.find((item) => item.id === result.transactionId);
+  assert.ok(transaction);
+  assert.equal(transaction?.status, 'financing');
+
+  const workflow = backend.data.workflows.find((item) => item.transactionId === result.transactionId);
+  assert.ok(workflow);
+  assert.equal(workflow?.currentState, 'financing');
+
+  const transactionEvents = backend.data.transactionEvents.filter((item) => item.transactionId === result.transactionId);
+  assert.ok(transactionEvents.length >= 5);
+  assert.ok(backend.data.ledger.some((entry) => entry.transactionId === result.transactionId && entry.eventType === 'transaction_stage_change'));
 });
 
 test('processes a successful payment webhook and writes a ledger entry once', async () => {

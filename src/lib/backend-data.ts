@@ -1495,6 +1495,55 @@ export const TRANSACTION_STAGES: { key: TransactionStage; label: string; order: 
   { key: 'completed', label: 'Completed', order: 9 },
 ];
 
+function syncWorkflowForTransactionStage(transactionId: string, nextStage: TransactionStage, actorId: string, notes?: string) {
+  const workflow = data.workflows.find((item) => item.transactionId === transactionId);
+  if (!workflow) return null;
+
+  const stageIndex = TRANSACTION_STAGES.findIndex((stage) => stage.key === nextStage);
+  if (stageIndex === -1) return workflow;
+
+  const now = new Date().toISOString();
+  workflow.currentState = nextStage;
+  workflow.status = nextStage === 'completed' ? 'completed' : 'active';
+  workflow.context = {
+    ...workflow.context,
+    currentTransactionStage: nextStage,
+    currentTransactionStageLabel: TRANSACTION_STAGES[stageIndex].label,
+    lastStageTransitionAt: now,
+    lastStageTransitionActorId: actorId,
+    lastStageTransitionNotes: notes || null,
+  };
+
+  if ((workflow.context as Record<string, unknown>).autonomousPurchase === true && Array.isArray(workflow.steps)) {
+    workflow.steps.forEach((step, index) => {
+      if (index < stageIndex) {
+        step.status = 'completed';
+        step.startedAt = step.startedAt || now;
+        step.completedAt = step.completedAt || now;
+        step.outputData = step.outputData || {
+          stage: TRANSACTION_STAGES[index]?.key || step.stepType,
+          completed: true,
+          autonomous: true,
+        };
+      } else if (index === stageIndex) {
+        step.status = nextStage === 'completed' ? 'completed' : 'active';
+        step.startedAt = step.startedAt || now;
+        if (nextStage === 'completed') {
+          step.completedAt = step.completedAt || now;
+        }
+      } else if (step.status !== 'completed') {
+        step.status = 'pending';
+      }
+    });
+  }
+
+  if (nextStage === 'completed') {
+    workflow.completedAt = now;
+  }
+
+  return workflow;
+}
+
 export function advanceTransactionStage(transactionId: string, actorId: string, notes?: string): Transaction | null {
   const tx = data.transactions.find(t => t.id === transactionId);
   if (!tx) return null;
@@ -1507,6 +1556,7 @@ export function advanceTransactionStage(transactionId: string, actorId: string, 
 
   tx.status = nextStage.key;
   tx.updatedAt = new Date().toISOString();
+  syncWorkflowForTransactionStage(transactionId, nextStage.key, actorId, notes);
 
   // Create immutable event record
   const event: TransactionEvent = {

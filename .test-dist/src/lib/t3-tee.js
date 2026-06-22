@@ -1,7 +1,7 @@
 // TrustLand AI Network - Terminal 3 TEE (Trusted Execution Environment) Module
 // Interfaces with Terminal 3's hardware-secured TEE infrastructure
 // Provides: secure key storage, attestation generation, TEE-protected operations
-import { signEd25519, verifyEd25519Signature, hashData, generateEd25519KeyPair } from './t3-crypto';
+import { signEd25519, verifyEd25519Signature, hashData, generateEd25519KeyPair } from './t3-crypto.js';
 // ─── TEE Configuration ──────────────────────────────────────────────────────
 const TEE_CONFIG = {
     enclaveId: 'trustland-v1',

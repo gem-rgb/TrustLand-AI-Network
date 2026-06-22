@@ -1,10 +1,10 @@
-import 'server-only';
-import { addAuditLedgerEntry, advanceTransactionStage, data, initializeData } from './backend-data';
-import { canAdvanceWorkflowAfterPayment, getPaymentWorkflowDirective } from './t3-autonomous-purchase';
-import { generateEd25519KeyPair } from './t3-crypto';
-import { t3VerifiableLedger } from './t3-ledger';
-import { getStripeServerClient, isStripeDemoMode } from './stripe';
-import { getPaymentPurposeLabel, getPaymentStatusLabel, } from './payment-types';
+
+import { addAuditLedgerEntry, advanceTransactionStage, data, initializeData } from './backend-data.js';
+import { canAdvanceWorkflowAfterPayment, getPaymentWorkflowDirective } from './t3-autonomous-purchase.js';
+import { generateEd25519KeyPair } from './t3-crypto.js';
+import { t3VerifiableLedger } from './t3-ledger.js';
+import { getStripeServerClient, isStripeDemoMode } from './stripe.js';
+import { getPaymentPurposeLabel, getPaymentStatusLabel, } from './payment-types.js';
 const PAYMENT_SYSTEM_DID = 'did:t3:trustland:payments';
 const PAYMENT_RATE_LIMIT_WINDOW_MS = 60000;
 const PAYMENT_RATE_LIMIT_MAX = 5;
@@ -22,6 +22,7 @@ function createPaymentStore() {
         paymentsByStripeIntentId: new Map(),
         paymentsByTransactionPurposeKey: new Map(),
         processedWebhookEventIds: new Set(),
+        processedWebhookEventPayments: new Map(),
         rateLimitBuckets: new Map(),
         paymentKeyPair: generateEd25519KeyPair(),
     };
@@ -733,11 +734,33 @@ async function resolveStripeChargePaymentIntentId(stripePaymentIntentId) {
         return null;
     }
 }
+async function resolvePaymentFromWebhookEvent(event) {
+    let stripePaymentIntentId = resolveStripePaymentIntentIdFromEvent(event);
+    if (event.type.startsWith('charge.') && stripePaymentIntentId) {
+        const maybePaymentIntentId = await resolveStripeChargePaymentIntentId(stripePaymentIntentId);
+        stripePaymentIntentId = maybePaymentIntentId || stripePaymentIntentId;
+    }
+    const payload = event.data.object;
+    const metadata = payload.metadata || {};
+    const transactionId = metadata.trustlandTransactionId || metadata.transactionId || metadata.trustland_transaction_id;
+    const parcelId = metadata.parcelId;
+    const paymentPurpose = metadata.paymentPurpose;
+    const recordFromMetadata = paymentStore.paymentsByTransactionPurposeKey.get(transactionId && parcelId && paymentPurpose && isPaymentPurpose(paymentPurpose)
+        ? paymentTransactionKey(transactionId, parcelId, paymentPurpose)
+        : '');
+    const recordFromStripe = stripePaymentIntentId ? paymentStore.paymentsByStripeIntentId.get(stripePaymentIntentId) : undefined;
+    const paymentId = recordFromStripe || recordFromMetadata;
+    if (!paymentId)
+        return null;
+    return paymentStore.paymentsById.get(paymentId) || null;
+}
 export async function processStripeWebhookEvent(event) {
     if (paymentStore.processedWebhookEventIds.has(event.id)) {
+        const paymentId = paymentStore.processedWebhookEventPayments.get(event.id);
+        const duplicateRecord = paymentId ? paymentStore.paymentsById.get(paymentId) || null : await resolvePaymentFromWebhookEvent(event);
         return {
             duplicate: true,
-            payment: null,
+            payment: duplicateRecord ? sanitizePaymentRecord(duplicateRecord) : null,
         };
     }
     const payload = event.data.object;
@@ -770,6 +793,7 @@ export async function processStripeWebhookEvent(event) {
             payment: null,
         };
     }
+    paymentStore.processedWebhookEventPayments.set(event.id, paymentId);
     const property = getPropertyOrThrow(record.parcelId);
     const expected = deriveExpectedAmount(record.parcelId, record.paymentPurpose, record.workflowTransactionId || undefined);
     const amountMatches = typeof payload.amount === 'number'

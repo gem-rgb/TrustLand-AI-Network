@@ -48,7 +48,7 @@ const NAV_ITEMS: Array<NavItem> = [
   { view: 'autonomous-purchase', label: 'Autonomous Purchase', icon: Zap, badge: 'T3', roles: ['buyer'] },
 ];
 
-// ─── Error Boundary ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Error Boundary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
   constructor(props: { children: React.ReactNode }) {
     super(props);
@@ -77,7 +77,7 @@ export default function TrustLandLayout() {
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const socketRef = useRef<Socket | null>(null);
 
-  // Initial data load — staggered to avoid overwhelming the dev server
+  // Initial data load â€” staggered to avoid overwhelming the dev server
   const loadAllData = useCallback(async () => {
     const fetchers = [
       fetchDashboardStats, fetchIdentities, fetchAgents, fetchProperties,
@@ -117,7 +117,7 @@ export default function TrustLandLayout() {
       socketRef.current = newSocket;
 
       newSocket.on('connect_error', () => {
-        // WebSocket server not available — non-critical, app works without it
+        // WebSocket server not available â€” non-critical, app works without it
       });
 
       newSocket.on('ledger_update', () => {
@@ -141,7 +141,7 @@ export default function TrustLandLayout() {
         fetchMessages();
       });
     } catch {
-      // WebSocket initialization failed — non-critical
+      // WebSocket initialization failed â€” non-critical
       socketRef.current = null;
     }
 
@@ -198,7 +198,7 @@ export default function TrustLandLayout() {
   }
 
   // The property search landing view is a full-screen map experience
-  // (no left sidebar, dark blue hero) — render it standalone, outside
+  // (no left sidebar, dark blue hero) â€” render it standalone, outside
   // the sidebar shell, so it matches the TrustLand product demo layout.
   if (currentView === 'overview') {
     return (
@@ -297,7 +297,7 @@ export default function TrustLandLayout() {
   );
 }
 
-// ─── Overview / Hero View (legacy — kept for reference, replaced by PropertySearchView) ───
+// â”€â”€â”€ Overview / Hero View (legacy â€” kept for reference, replaced by PropertySearchView) â”€â”€â”€
 // @deprecated Use PropertySearchView as the default landing experience.
 function OverviewView() {
   const { setCurrentView, dashboardStats } = useTrustLandStore();
@@ -373,7 +373,7 @@ function OverviewView() {
             { step: 1, name: 'Identity Auth', agent: 'Buyer', type: 'authenticate' },
             { step: 2, name: 'Authority Delegation', agent: 'Buyer', type: 'delegate' },
             { step: 3, name: 'Property Search', agent: 'Buyer Agent', type: 'search' },
-            { step: 4, name: 'Agent Negotiation', agent: 'Buyer ↔ Seller', type: 'negotiate' },
+            { step: 4, name: 'Agent Negotiation', agent: 'Buyer â†” Seller', type: 'negotiate' },
             { step: 5, name: 'Ownership Verification', agent: 'Verification', type: 'verify' },
             { step: 6, name: 'Property Survey', agent: 'Surveyor', type: 'survey' },
             { step: 7, name: 'Market Valuation', agent: 'Valuer', type: 'value' },
@@ -418,7 +418,7 @@ function OverviewView() {
   );
 }
 
-// ─── Dashboard View ────────────────────────────────────────────────────────
+// â”€â”€â”€ Dashboard View â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function AdminDashboardView() {
   const { dashboardStats, agents, transactions, trustLedger } = useTrustLandStore();
@@ -504,7 +504,7 @@ function AdminDashboardView() {
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium truncate text-white">{entry.eventType.replace(/_/g, ' ')}</p>
                   <p className="text-[10px] text-white/50 truncate">
-                    {entry.actorDid.slice(0, 20)}... → {String(entry.eventData.action ?? entry.eventData.credentialType ?? '')}
+                    {entry.actorDid.slice(0, 20)}... â†’ {String(entry.eventData.action ?? entry.eventData.credentialType ?? '')}
                   </p>
                 </div>
                 <span className="text-[10px] text-white/40 whitespace-nowrap">{new Date(entry.timestamp).toLocaleTimeString()}</span>
@@ -534,7 +534,7 @@ function AdminDashboardView() {
   );
 }
 
-// ─── Agent Marketplace ─────────────────────────────────────────────────────
+// â”€â”€â”€ Agent Marketplace â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function DashboardView() {
   const { dashboardRole } = useTrustLandStore();
@@ -1147,7 +1147,7 @@ function AgentMarketplace() {
   );
 }
 
-// ─── Trust Ledger ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Trust Ledger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function TrustLedgerView() {
   const { trustLedger, fetchTrustLedger } = useTrustLandStore();
@@ -1181,12 +1181,12 @@ function TrustLedgerView() {
       const res = await fetch('/api/ledger/verify');
       const data = await res.json();
       if (data.verified) {
-        setVerifyResult(`✓ Hash-chain verified — ${data.blocks ?? filtered.length} blocks intact`);
+        setVerifyResult(`âœ“ Hash-chain verified â€” ${data.blocks ?? filtered.length} blocks intact`);
       } else {
-        setVerifyResult(`✗ Verification failed: ${data.error || 'chain broken'}`);
+        setVerifyResult(`âœ— Verification failed: ${data.error || 'chain broken'}`);
       }
     } catch (e: any) {
-      setVerifyResult(`✗ Error: ${e.message}`);
+      setVerifyResult(`âœ— Error: ${e.message}`);
     } finally {
       setVerifying(false);
     }
@@ -1201,7 +1201,7 @@ function TrustLedgerView() {
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={handleVerify} disabled={verifying}>
-            <Lock className="h-3 w-3 mr-1" /> {verifying ? 'Verifying…' : 'Verify Chain'}
+            <Lock className="h-3 w-3 mr-1" /> {verifying ? 'Verifyingâ€¦' : 'Verify Chain'}
           </Button>
           <Badge variant="outline" className="border-emerald-500 text-emerald-600">
             <BookOpen className="h-3 w-3 mr-1" /> {trustLedger.length} Blocks
@@ -1210,7 +1210,7 @@ function TrustLedgerView() {
       </div>
 
       {verifyResult && (
-        <div className={`rounded-lg px-3 py-2 text-sm border ${verifyResult.startsWith('✓') ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+        <div className={`rounded-lg px-3 py-2 text-sm border ${verifyResult.startsWith('âœ“') ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
           {verifyResult}
         </div>
       )}
@@ -1222,7 +1222,7 @@ function TrustLedgerView() {
           <Input
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            placeholder="Search by event type, actor DID, hash, or event data…"
+            placeholder="Search by event type, actor DID, hash, or event dataâ€¦"
             className="pl-10"
           />
         </div>
@@ -1263,9 +1263,9 @@ function TrustLedgerView() {
                 <tr key={entry.id} className={i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}>
                   <td className="p-3 font-mono">#{entry.blockNumber}</td>
                   <td className="p-3"><Badge variant="outline" className="text-[10px]">{entry.eventType.replace(/_/g, ' ')}</Badge></td>
-                  <td className="p-3 font-mono truncate max-w-[150px]">{entry.actorDid?.slice(0, 24) ?? '—'}…</td>
-                  <td className="p-3 truncate max-w-[200px]">{JSON.stringify(entry.eventData).slice(0, 60)}…</td>
-                  <td className="p-3 font-mono text-muted-foreground truncate max-w-[120px]">{entry.eventHash?.slice(0, 16) ?? '—'}…</td>
+                  <td className="p-3 font-mono truncate max-w-[150px]">{entry.actorDid?.slice(0, 24) ?? 'â€”'}â€¦</td>
+                  <td className="p-3 truncate max-w-[200px]">{JSON.stringify(entry.eventData).slice(0, 60)}â€¦</td>
+                  <td className="p-3 font-mono text-muted-foreground truncate max-w-[120px]">{entry.eventHash?.slice(0, 16) ?? 'â€”'}â€¦</td>
                   <td className="p-3">
                     {entry.t3Attestation?.agentAuthVerified ? (
                       <Badge variant="outline" className="text-[9px] border-emerald-500 text-emerald-600"><Lock className="h-2.5 w-2.5 mr-0.5" />T3</Badge>
@@ -1282,7 +1282,7 @@ function TrustLedgerView() {
         {totalPages > 1 && (
           <div className="flex items-center justify-between p-3 border-t border-border bg-muted/30 text-xs">
             <span className="text-muted-foreground">
-              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
+              Showing {page * PAGE_SIZE + 1}â€“{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
             </span>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous</Button>
@@ -1296,206 +1296,7 @@ function TrustLedgerView() {
   );
 }
 
-// ─── Transaction Workflow ──────────────────────────────────────────────────
-
-function TransactionWorkflow() {
-  const { transactions, properties, agents, identities, workflows, advanceWorkflow, isLoading, fetchTransactionDetail, advanceTransactionStage, transactionEvents, fetchTransactionEvents, transactionStages } = useTrustLandStore();
-  const [selectedTxId, setSelectedTxId] = React.useState<string | null>(transactions.length > 0 ? transactions[0].id : null);
-  const [showEvents, setShowEvents] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!selectedTxId && transactions.length > 0) {
-      setSelectedTxId(transactions[0].id);
-    }
-  }, [transactions, selectedTxId]);
-
-  React.useEffect(() => {
-    if (selectedTxId) {
-      fetchTransactionDetail(selectedTxId);
-      fetchTransactionEvents(selectedTxId);
-    }
-  }, [selectedTxId, fetchTransactionDetail, fetchTransactionEvents]);
-
-  const selectedTx = transactions.find(t => t.id === selectedTxId);
-  const workflow = selectedTx ? workflows.find(w => w.transactionId === selectedTx.id) : null;
-  const property = selectedTx ? properties.find(p => p.id === selectedTx.propertyId) : null;
-  const txEvents = transactionEvents.filter(e => e.transactionId === selectedTxId);
-
-  const stages = transactionStages.length > 0 ? transactionStages : [
-    { key: 'draft', label: 'Draft', order: 1 },
-    { key: 'offer_submitted', label: 'Offer Submitted', order: 2 },
-    { key: 'seller_review', label: 'Seller Review', order: 3 },
-    { key: 'due_diligence', label: 'Due Diligence', order: 4 },
-    { key: 'legal_review', label: 'Legal Review', order: 5 },
-    { key: 'financing', label: 'Financing', order: 6 },
-    { key: 'approval', label: 'Approval', order: 7 },
-    { key: 'transfer', label: 'Transfer', order: 8 },
-    { key: 'completed', label: 'Completed', order: 9 },
-  ];
-
-  const handleAdvanceStage = async () => {
-    if (!selectedTxId) return;
-    const buyerDid = identities.find(i => i.profile.role === 'buyer')?.did || '';
-    await advanceTransactionStage(selectedTxId, buyerDid, 'Advanced via Transaction Workflow UI');
-    toast.success('Transaction stage advanced');
-  };
-
-  const statusColors: Record<string, string> = {
-    completed: 'bg-emerald-500',
-    active: 'bg-amber-500',
-    pending: 'bg-gray-300',
-    failed: 'bg-red-500',
-    skipped: 'bg-gray-400',
-  };
-
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Transaction Workflow</h1>
-          <p className="text-muted-foreground text-sm">9-stage property transaction pipeline with immutable event records</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant={showEvents ? 'default' : 'outline'} className="text-xs" onClick={() => setShowEvents(!showEvents)}>
-            <Clock className="h-3 w-3 mr-1" /> {showEvents ? 'Hide Events' : 'Show Events'}
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Transaction List */}
-        <div className="space-y-3">
-          <h3 className="font-semibold text-sm">Transactions</h3>
-          {transactions.map(tx => {
-            const prop = properties.find(p => p.id === tx.propertyId);
-            return (
-              <div key={tx.id} className={`border rounded-lg p-3 cursor-pointer transition-colors ${selectedTxId === tx.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' : 'border-border hover:bg-muted/50'}`} onClick={() => { setSelectedTxId(tx.id); fetchTransactionDetail(tx.id); fetchTransactionEvents(tx.id); }}>
-                <p className="text-sm font-medium">{prop?.title || 'Property'}</p>
-                <p className="text-xs text-muted-foreground capitalize">{tx.status.replace(/_/g, ' ')}</p>
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-xs font-medium">${(tx.amount / 1000000).toFixed(2)}M</span>
-                  <Badge variant={tx.riskLevel === 'low' ? 'secondary' : tx.riskLevel === 'medium' ? 'outline' : 'destructive'} className="text-[10px]">{tx.riskLevel}</Badge>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Transaction Detail */}
-        <div className="lg:col-span-3 space-y-6">
-          {selectedTx ? (
-            <>
-              {/* 9-Stage Pipeline */}
-              <div className="border border-border rounded-xl p-5 bg-card">
-                <h3 className="font-semibold mb-4 flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" /> Transaction Pipeline</h3>
-                <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
-                  {stages.map((stage, i) => {
-                    const currentStageIndex = stages.findIndex(s => s.key === selectedTx.status);
-                    const isCompleted = i < currentStageIndex;
-                    const isCurrent = stage.key === selectedTx.status;
-                    return (
-                      <div key={stage.key} className={`text-center p-2 rounded-lg border transition-colors ${isCompleted ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20' : isCurrent ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/20' : 'border-border'}`}>
-                        <div className={`h-6 w-6 rounded-full mx-auto flex items-center justify-center text-white text-xs font-bold mb-1 ${isCompleted ? 'bg-emerald-500' : isCurrent ? 'bg-amber-500' : 'bg-gray-300'}`}>
-                          {isCompleted ? '✓' : stage.order}
-                        </div>
-                        <p className="text-[10px] font-medium leading-tight">{stage.label}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-                {selectedTx.status !== 'completed' && (
-                  <div className="mt-4 flex justify-end">
-                    <Button size="sm" className="text-xs" disabled={isLoading} onClick={handleAdvanceStage}>
-                      {isLoading ? 'Processing...' : 'Advance to Next Stage'} <ChevronRight className="h-3 w-3 ml-1" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Event Timeline */}
-              {showEvents && (
-                <div className="border border-border rounded-xl p-5 bg-card">
-                  <h3 className="font-semibold mb-4 flex items-center gap-2"><Clock className="h-4 w-4" /> Event Timeline</h3>
-                  <div className="space-y-3 max-h-80 overflow-y-auto">
-                    {txEvents.length > 0 ? txEvents.map(event => (
-                      <div key={event.id} className="flex items-start gap-3 p-2 rounded-lg bg-muted/50">
-                        <div className="h-6 w-6 rounded-full flex items-center justify-center bg-emerald-100 flex-shrink-0">
-                          <Activity className="h-3 w-3 text-emerald-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-[10px]">{event.eventType.replace(/_/g, ' ')}</Badge>
-                            <span className="text-[10px] text-muted-foreground">{event.actorType}</span>
-                            {event.signatureType === 'Ed25519Signature2020' && (
-                              <Badge variant="outline" className="text-[8px] border-emerald-500 text-emerald-600"><Lock className="h-2 w-2 mr-0.5" />Signed</Badge>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1 truncate">{event.actorId.slice(0, 24)}...</p>
-                          {event.metadata && (
-                            <p className="text-[10px] text-muted-foreground mt-1">{typeof event.metadata === 'object' ? String((event.metadata as Record<string, unknown>).notes ?? JSON.stringify(event.metadata).slice(0, 80)) : String(event.metadata).slice(0, 80)}</p>
-                          )}
-                          <p className="text-[10px] text-muted-foreground mt-1">{new Date(event.timestamp).toLocaleString()}</p>
-                        </div>
-                      </div>
-                    )) : (
-                      <p className="text-sm text-muted-foreground">No events recorded yet</p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Workflow Steps (existing 12-step view) */}
-              {workflow && (
-                <div className="border border-border rounded-xl p-5 bg-card">
-                  <h3 className="font-semibold mb-4">12-Step Workflow Detail</h3>
-                  <div className="w-full bg-muted rounded-full h-2 mb-4">
-                    <div className="bg-emerald-500 h-2 rounded-full transition-all" style={{ width: `${(selectedTx.currentStep / selectedTx.totalSteps) * 100}%` }} />
-                  </div>
-                  <div className="space-y-3">
-                    {workflow.steps.map((step, i) => {
-                      const agent = step.agentId ? agents.find(a => a.id === step.agentId) : null;
-                      return (
-                        <div key={step.id} className={`border rounded-lg p-3 ${step.status === 'active' ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20' : ''}`}>
-                          <div className="flex items-start gap-3">
-                            <div className={`h-7 w-7 rounded-full flex items-center justify-center text-white text-xs font-bold ${statusColors[step.status]}`}>
-                              {step.status === 'completed' ? '✓' : step.stepOrder}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between">
-                                <h4 className="text-sm font-medium">{step.stepName}</h4>
-                                <Badge variant="outline" className="text-[10px]">{step.status}</Badge>
-                              </div>
-                              {agent && <p className="text-[10px] text-muted-foreground mt-0.5">Agent: {agent.name}</p>}
-                              {step.signature && <p className="text-[10px] font-mono text-emerald-600 mt-0.5 truncate">Signed: {step.signature.slice(0, 32)}...</p>}
-                              {step.status === 'active' && (
-                                <Button size="sm" className="mt-2 h-7 text-xs" disabled={isLoading} onClick={() => advanceWorkflow(workflow.id, i)}>
-                                  Complete Step <ChevronRight className="h-3 w-3 ml-1" />
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex items-center justify-center h-64 text-muted-foreground">
-              <div className="text-center">
-                <ArrowRightLeft className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                <p>Select a transaction to view workflow</p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Due Diligence ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Transaction Workflow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function DueDiligenceView() {
   const { documents, riskReports, uploadDocument, properties, identities, fetchDocuments, fetchRiskReports } = useTrustLandStore();
@@ -1521,7 +1322,7 @@ function DueDiligenceView() {
     }
     setUploading(true);
     try {
-      // Read file as data URL (base64) — works for any file type
+      // Read file as data URL (base64) â€” works for any file type
       const reader = new FileReader();
       reader.onload = async () => {
         const fileContent = reader.result as string; // data URL
@@ -1592,10 +1393,10 @@ function DueDiligenceView() {
   };
 
   const statusIcons: Record<string, string> = {
-    verified: '✓ Verified',
-    pending: '⏳ Pending',
-    flagged: '⚠ Flagged',
-    rejected: '✕ Rejected'
+    verified: 'âœ“ Verified',
+    pending: 'â³ Pending',
+    flagged: 'âš  Flagged',
+    rejected: 'âœ• Rejected'
   };
 
   const docTypes = ['title_deed', 'survey_map', 'sale_agreement', 'valuation_report', 'identity_proof', 'bank_statement', 'tax_record'];
@@ -1608,7 +1409,7 @@ function DueDiligenceView() {
           <p className="text-muted-foreground text-sm">AI-powered document analysis, verification, and risk assessment</p>
         </div>
         <Badge variant="outline" className="border-emerald-500 text-emerald-600">
-          <FileSearch className="h-3 w-3 mr-1" /> {documents.length} docs · {riskReports.length} reports
+          <FileSearch className="h-3 w-3 mr-1" /> {documents.length} docs Â· {riskReports.length} reports
         </Badge>
       </div>
 
@@ -1621,11 +1422,11 @@ function DueDiligenceView() {
           <div>
             <Label className="text-xs mb-1 block">Property *</Label>
             <Select value={selectedPropertyId} onValueChange={setSelectedPropertyId}>
-              <SelectTrigger><SelectValue placeholder="Select a property…" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Select a propertyâ€¦" /></SelectTrigger>
               <SelectContent>
                 {properties.map(p => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.title} — {p.city}
+                    {p.title} â€” {p.city}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1660,7 +1461,7 @@ function DueDiligenceView() {
             className="bg-emerald-600 hover:bg-emerald-700"
           >
             {uploading ? (
-              <><Activity className="h-4 w-4 mr-1 animate-pulse" /> Uploading…</>
+              <><Activity className="h-4 w-4 mr-1 animate-pulse" /> Uploadingâ€¦</>
             ) : (
               <><FileSearch className="h-4 w-4 mr-1" /> Choose File to Upload</>
             )}
@@ -1672,13 +1473,13 @@ function DueDiligenceView() {
             disabled={generatingReport || !selectedPropertyId}
           >
             {generatingReport ? (
-              <><Activity className="h-4 w-4 mr-1 animate-pulse" /> Generating…</>
+              <><Activity className="h-4 w-4 mr-1 animate-pulse" /> Generatingâ€¦</>
             ) : (
               <><Star className="h-4 w-4 mr-1" /> Generate Risk Report</>
             )}
           </Button>
           <span className="text-[10px] text-muted-foreground">
-            Accepts PDF, JPG, PNG, DOC, TXT — analyzed with OCR + anomaly detection
+            Accepts PDF, JPG, PNG, DOC, TXT â€” analyzed with OCR + anomaly detection
           </span>
         </div>
       </div>
@@ -1689,7 +1490,7 @@ function DueDiligenceView() {
           {(() => {
             const p = properties.find(p => p.id === selectedPropertyId);
             return p ? (
-              <>Analyzing documents for <strong>{p.title}</strong> at {p.address}, {p.city} · Trust Score {p.trustScore}%</>
+              <>Analyzing documents for <strong>{p.title}</strong> at {p.address}, {p.city} Â· Trust Score {p.trustScore}%</>
             ) : null;
           })()}
         </div>
@@ -1723,11 +1524,11 @@ function DueDiligenceView() {
                 {doc.anomalies.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {doc.anomalies.map((a, i) => (
-                      <div key={i} className="text-[10px] text-red-600 bg-red-50 dark:bg-red-950/20 px-2 py-1 rounded">⚠ {a}</div>
+                      <div key={i} className="text-[10px] text-red-600 bg-red-50 dark:bg-red-950/20 px-2 py-1 rounded">âš  {a}</div>
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-muted-foreground mt-2 font-mono">Hash: {doc.fileHash?.slice(0, 32) ?? '—'}…</p>
+                <p className="text-[10px] text-muted-foreground mt-2 font-mono">Hash: {doc.fileHash?.slice(0, 32) ?? 'â€”'}â€¦</p>
               </div>
             ))}
           </div>
@@ -1763,7 +1564,7 @@ function DueDiligenceView() {
                         <span className="font-medium">{finding.category}</span>
                       </div>
                       <p className="text-muted-foreground">{finding.description}</p>
-                      <p className="text-emerald-600 mt-1">→ {finding.recommendation}</p>
+                      <p className="text-emerald-600 mt-1">â†’ {finding.recommendation}</p>
                     </div>
                   ))}
                 </div>
@@ -1783,7 +1584,7 @@ function DueDiligenceView() {
   );
 }
 
-// ─── Trust Score View ──────────────────────────────────────────────────────
+// â”€â”€â”€ Trust Score View â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function TrustScoreView() {
   const { identities, fetchTrustScore } = useTrustLandStore();
@@ -1884,7 +1685,7 @@ function TrustScoreView() {
   );
 }
 
-// ─── Messages View ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Messages View â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function MessagesView() {
   const { messages, identities, sendMessage, fetchMessages } = useTrustLandStore();
@@ -1971,7 +1772,7 @@ function MessagesView() {
           <div className="space-y-3">
             <div>
               <Label className="text-xs mb-1 block">From (Sender)</Label>
-              <Input value={senderIdentity ? `${senderIdentity.profile.name} (${senderIdentity.did.slice(0, 24)}…)` : '—'} disabled />
+              <Input value={senderIdentity ? `${senderIdentity.profile.name} (${senderIdentity.did.slice(0, 24)}â€¦)` : 'â€”'} disabled />
             </div>
             <div>
               <Label className="text-xs mb-1 block">To (Recipient) *</Label>
@@ -1980,7 +1781,7 @@ function MessagesView() {
                 <SelectContent>
                   {identities.filter(i => i.did !== senderIdentity?.did).map(i => (
                     <SelectItem key={i.did} value={i.did}>
-                      {i.profile.name} — {i.credentialType}
+                      {i.profile.name} â€” {i.credentialType}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -2021,14 +1822,14 @@ function MessagesView() {
             </div>
             <div>
               <Label className="text-xs mb-1 block">Message *</Label>
-              <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Write your message…" />
+              <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Write your messageâ€¦" />
             </div>
             <div className="flex items-center justify-between pt-2">
               <p className="text-[10px] text-muted-foreground">
                 <Lock className="h-3 w-3 inline mr-1" />Will be signed with your Ed25519 key
               </p>
               <Button onClick={handleSend} disabled={sending} className="bg-emerald-600 hover:bg-emerald-700">
-                {sending ? 'Sending…' : 'Send Signed Message'}
+                {sending ? 'Sendingâ€¦' : 'Send Signed Message'}
               </Button>
             </div>
           </div>
@@ -2054,7 +1855,7 @@ function MessagesView() {
             </div>
             <div className="flex items-center gap-2 mb-2">
               <span className="text-xs font-medium text-emerald-600">{getIdentityName(msg.senderDid)}</span>
-              <span className="text-xs text-muted-foreground">→</span>
+              <span className="text-xs text-muted-foreground">â†’</span>
               <span className="text-xs font-medium text-teal-600">{getIdentityName(msg.receiverDid)}</span>
             </div>
             <div className="p-2 bg-muted rounded text-xs">
@@ -2068,7 +1869,7 @@ function MessagesView() {
   );
 }
 
-// ─── Identities View ───────────────────────────────────────────────────────
+// â”€â”€â”€ Identities View â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function IdentitiesView() {
   const { identities } = useTrustLandStore();
@@ -2119,7 +1920,7 @@ function IdentitiesView() {
             <div className="flex items-center gap-2">
               <Badge className={`text-[10px] ${credentialTypeColors[identity.credentialType] || 'bg-gray-100'}`}>{identity.credentialType.replace(/_/g, ' ')}</Badge>
               <Badge variant={identity.status === 'active' ? 'secondary' : 'destructive'} className="text-[10px]">{identity.status}</Badge>
-              {identity.verifiedAt && <span className="text-[10px] text-emerald-600">✓ Verified</span>}
+              {identity.verifiedAt && <span className="text-[10px] text-emerald-600">âœ“ Verified</span>}
               {identity.t3Integrated && <Badge variant="outline" className="text-[9px] border-emerald-500 text-emerald-600"><Lock className="h-2.5 w-2.5 mr-0.5" />T3</Badge>}
             </div>
           </div>
@@ -2129,7 +1930,7 @@ function IdentitiesView() {
   );
 }
 
-// ─── Property Verification Dashboard ─────────────────────────────────────────
+// â”€â”€â”€ Property Verification Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface PropertyVerification {
   id: string;
@@ -2405,7 +2206,7 @@ function VerificationDashboardView() {
                     <SelectTrigger><SelectValue placeholder="Select a property" /></SelectTrigger>
                     <SelectContent>
                       {properties.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.title} — {p.city}</SelectItem>
+                        <SelectItem key={p.id} value={p.id}>{p.title} â€” {p.city}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -2454,7 +2255,7 @@ function VerificationDashboardView() {
                     <SelectTrigger><SelectValue placeholder="Select a property" /></SelectTrigger>
                     <SelectContent>
                       {properties.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.title} — {p.city}</SelectItem>
+                        <SelectItem key={p.id} value={p.id}>{p.title} â€” {p.city}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -2597,7 +2398,7 @@ function VerificationDashboardView() {
                   )}
                   <div>
                     <p className="text-[10px] text-muted-foreground">T3 Auth</p>
-                    <p className="text-[10px] font-mono">{selectedVerification.t3AgentAuthVerified ? '✓ Verified' : '✕ Not verified'}</p>
+                    <p className="text-[10px] font-mono">{selectedVerification.t3AgentAuthVerified ? 'âœ“ Verified' : 'âœ• Not verified'}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-muted-foreground">Signature</p>
@@ -2760,7 +2561,7 @@ function VerificationDashboardView() {
                           </div>
                           <p className="text-muted-foreground">{f.description}</p>
                           {f.recommendation && (
-                            <p className="text-emerald-600 mt-1">→ {f.recommendation}</p>
+                            <p className="text-emerald-600 mt-1">â†’ {f.recommendation}</p>
                           )}
                         </div>
                       ))}
@@ -2863,7 +2664,7 @@ function VerificationDashboardView() {
   );
 }
 
-// ─── Autonomous Purchase View (The "Wow" Feature) ────────────────────────────
+// â”€â”€â”€ Autonomous Purchase View (The "Wow" Feature) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function AutonomousPurchaseView() {
   const {
@@ -2888,9 +2689,9 @@ function AutonomousPurchaseView() {
   const handleCreate = async () => {
     if (!buyerIdentity) return;
     await createAutonomousDelegation(buyerIdentity.did, buyerIdentity.profile.name, criteria);
-    const dels = useTrustLandStore.getState().autonomousDelegations;
-    if (dels.length > 0) {
-      setDelegationId(dels[0].id);
+    const createdDelegationId = useTrustLandStore.getState().currentDelegationId;
+    if (createdDelegationId) {
+      setDelegationId(createdDelegationId);
       setStep('created');
     }
   };
@@ -3064,11 +2865,11 @@ function AutonomousPurchaseView() {
               </div>
               <div className="bg-emerald-950/30 p-2 rounded border border-emerald-800/50">
                 <p className="text-muted-foreground">T3 API Key</p>
-                <p className="font-mono text-emerald-600">Issued ✓</p>
+                <p className="font-mono text-emerald-600">Issued âœ“</p>
               </div>
               <div className="bg-emerald-950/30 p-2 rounded border border-emerald-800/50">
                 <p className="text-muted-foreground">Signature</p>
-                <p className="font-mono text-emerald-600">Ed25519 ✓</p>
+                <p className="font-mono text-emerald-600">Ed25519 âœ“</p>
               </div>
             </div>
           </div>
@@ -3092,7 +2893,7 @@ function AutonomousPurchaseView() {
                 <div key={aStep.id} className={`border rounded-lg p-4 ${aStep.status === 'active' ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20' : aStep.status === 'completed' ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/10' : 'border-border'}`}>
                   <div className="flex items-center gap-3">
                     <div className={`h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${aStep.status === 'completed' ? 'bg-emerald-500' : aStep.status === 'active' ? 'bg-amber-500' : aStep.status === 'failed' ? 'bg-red-500' : 'bg-gray-400'}`}>
-                      {aStep.status === 'completed' ? '✓' : i + 1}
+                      {aStep.status === 'completed' ? 'âœ“' : i + 1}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
@@ -3167,18 +2968,29 @@ function AutonomousPurchaseView() {
                 <Lock className="h-4 w-4 text-emerald-600" />
                 <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
                   All actions signed with Ed25519Signature2020 and authenticated via Terminal 3 Agent Auth SDK
-                  {autonomousResult.allActionsSigned && ' ✓ All signatures verified'}
+                  {autonomousResult.allActionsSigned && ' âœ“ All signatures verified'}
                 </span>
               </div>
+              {autonomousResult.transactionId && (
+                <div className="mt-4 rounded-lg border border-white/10 bg-[#06122e] p-4 text-sm text-white/80">
+                  <p className="font-medium text-white">Backend purchase execution</p>
+                  <p className="mt-1">
+                    Transaction <span className="font-mono text-orange-300">{autonomousResult.transactionId}</span> moved to{' '}
+                    <span className="font-medium text-emerald-300">{autonomousResult.workflowStatus || 'financing'}</span> and is
+                    waiting on <span className="font-medium text-amber-300">{autonomousResult.nextRequiredWorkflowStep || 'payment verification'}</span>.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
-          {autonomousResult?.recommended && delegationId && (
+          {autonomousResult?.recommended && autonomousResult.paymentRequired && (autonomousResult.transactionId || delegationId) && (
             <div className="space-y-4">
               <TransactionPaymentView
                 parcelId={autonomousResult.propertyId}
-                transactionId={delegationId}
-                defaultPaymentPurpose="reservation_deposit"
+                transactionId={autonomousResult.transactionId || delegationId}
+                workflowTransactionId={autonomousResult.workflowTransactionId || autonomousResult.transactionId || delegationId}
+                defaultPaymentPurpose={autonomousResult.paymentPurpose || 'reservation_deposit'}
                 onVerified={() => {
                   toast.success('Payment verified by TrustLand', {
                     description: 'The autonomous purchase workflow can continue once the server verification completes.',
@@ -3200,7 +3012,7 @@ function AutonomousPurchaseView() {
   );
 }
 
-// ─── Trust Score Engine View ──────────────────────────────────────────────────
+// â”€â”€â”€ Trust Score Engine View â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function TrustEngineView() {
   const { trustProfiles, identities, agents, properties, calculateTrustScore, fetchTrustProfiles } = useTrustLandStore();
@@ -3367,7 +3179,7 @@ function TrustEngineView() {
                   </div>
                   <Badge className={`mt-3 ${getTrustBadgeColor(selectedProfile.trustScore)}`}>{getTrustLabel(selectedProfile.trustScore)}</Badge>
                   <p className="text-xs text-muted-foreground mt-2">
-                    {selectedProfile.entityType === 'user' ? 'User' : selectedProfile.entityType === 'agent' ? 'Agent' : 'Property'} • Updated {new Date(selectedProfile.lastUpdated).toLocaleString()}
+                    {selectedProfile.entityType === 'user' ? 'User' : selectedProfile.entityType === 'agent' ? 'Agent' : 'Property'} â€¢ Updated {new Date(selectedProfile.lastUpdated).toLocaleString()}
                   </p>
                 </div>
               </div>
@@ -3393,7 +3205,7 @@ function TrustEngineView() {
                         <span className="text-sm">{factor.label}</span>
                         <span className={`text-sm font-medium ${factor.type === 'penalty' ? 'text-red-600' : 'text-emerald-600'}`}>
                           {factor.type === 'boolean' ? (factor.value ? `+${factor.points}` : '+0') :
-                           factor.type === 'penalty' ? `${factor.points} × ${factor.value}` :
+                           factor.type === 'penalty' ? `${factor.points} Ã— ${factor.value}` :
                            factor.type === 'percentage' ? `+${Math.round(Number(factor.value) * factor.points / 100)}` :
                            factor.type === 'days' ? `+${Math.min(Math.floor(Number(factor.value) / 30), factor.points)}` :
                            `+${Math.min(Number(factor.value) * 5, factor.points)}`}
@@ -3438,7 +3250,7 @@ function TrustEngineView() {
   );
 }
 
-// ─── Audit Ledger Dashboard ─────────────────────────────────────────────────
+// â”€â”€â”€ Audit Ledger Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function AuditLedgerDashboard() {
   const { auditLedger, auditLedgerBlockHeight, fetchAuditLedger, verifyAuditLedger } = useTrustLandStore();
@@ -3569,7 +3381,7 @@ function AuditLedgerDashboard() {
   );
 }
 
-// ─── Enterprise Analytics Dashboard ──────────────────────────────────────────
+// â”€â”€â”€ Enterprise Analytics Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function AnalyticsDashboard() {
   const { analyticsMetrics, fetchAnalytics, properties } = useTrustLandStore();
@@ -3595,15 +3407,15 @@ function AnalyticsDashboard() {
     </div>
   );
   if (!analyticsMetrics) return <div className="p-8 text-center text-muted-foreground">
-    <Activity className="h-8 w-8 mx-auto mb-2 animate-pulse" /> Loading analytics…
+    <Activity className="h-8 w-8 mx-auto mb-2 animate-pulse" /> Loading analyticsâ€¦
   </div>;
 
-  // Role-scoped insights — what each role sees in the metrics
+  // Role-scoped insights â€” what each role sees in the metrics
   const roleInsights: Record<string, string> = {
-    admin: 'Full platform visibility — all properties, agents, transactions, and ledger events.',
-    government: 'Registry & compliance focus — verification rates, flagged properties, and audit ledger integrity.',
-    institution: 'Financing focus — transaction volume, average prices, and active mortgages in your portfolio.',
-    bank: 'Risk & escrow focus — trust score distribution, due-diligence reports, and active escrow transactions.',
+    admin: 'Full platform visibility â€” all properties, agents, transactions, and ledger events.',
+    government: 'Registry & compliance focus â€” verification rates, flagged properties, and audit ledger integrity.',
+    institution: 'Financing focus â€” transaction volume, average prices, and active mortgages in your portfolio.',
+    bank: 'Risk & escrow focus â€” trust score distribution, due-diligence reports, and active escrow transactions.',
   };
 
   return (
@@ -3633,7 +3445,7 @@ function AnalyticsDashboard() {
         </div>
       </div>
 
-      {/* Role insight banner — explains what the role filter does */}
+      {/* Role insight banner â€” explains what the role filter does */}
       <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 text-sm text-emerald-800 dark:text-emerald-200">
         <strong className="font-medium capitalize">{roleView} View:</strong> {roleInsights[roleView]}
       </div>

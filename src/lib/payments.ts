@@ -32,6 +32,7 @@ type PaymentStore = {
   paymentsByStripeIntentId: Map<string, string>;
   paymentsByTransactionPurposeKey: Map<string, string>;
   processedWebhookEventIds: Set<string>;
+  processedWebhookEventPayments: Map<string, string>;
   rateLimitBuckets: Map<string, number[]>;
   paymentKeyPair: ReturnType<typeof generateEd25519KeyPair>;
 };
@@ -54,6 +55,7 @@ function createPaymentStore(): PaymentStore {
     paymentsByStripeIntentId: new Map(),
     paymentsByTransactionPurposeKey: new Map(),
     processedWebhookEventIds: new Set(),
+    processedWebhookEventPayments: new Map(),
     rateLimitBuckets: new Map(),
     paymentKeyPair: generateEd25519KeyPair(),
   };
@@ -899,7 +901,8 @@ async function resolvePaymentFromWebhookEvent(event: { type: string; data: { obj
 
 export async function processStripeWebhookEvent(event: { id: string; type: string; data: { object: unknown } }) {
   if (paymentStore.processedWebhookEventIds.has(event.id)) {
-    const duplicateRecord = await resolvePaymentFromWebhookEvent(event);
+    const paymentId = paymentStore.processedWebhookEventPayments.get(event.id);
+    const duplicateRecord = paymentId ? paymentStore.paymentsById.get(paymentId) || null : await resolvePaymentFromWebhookEvent(event);
     return {
       duplicate: true,
       payment: duplicateRecord ? sanitizePaymentRecord(duplicateRecord) : null,
@@ -951,6 +954,8 @@ export async function processStripeWebhookEvent(event: { id: string; type: strin
       payment: null as PaymentRecord | null,
     };
   }
+
+  paymentStore.processedWebhookEventPayments.set(event.id, paymentId);
 
   const property = getPropertyOrThrow(record.parcelId);
   const expected = deriveExpectedAmount(record.parcelId, record.paymentPurpose, record.workflowTransactionId || undefined);

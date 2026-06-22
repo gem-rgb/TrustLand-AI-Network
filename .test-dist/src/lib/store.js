@@ -1,7 +1,7 @@
 // TrustLand AI Network - Global State Store (Zustand)
 // Updated with Terminal 3 Agent Auth SDK integration
 import { create } from 'zustand';
-import { canAccessView, deriveDashboardRole } from './trustland-access';
+import { canAccessView, deriveDashboardRole } from './trustland-access.js';
 const AUTH_SESSION_STORAGE_KEY = 'trustland-auth-session';
 const AUTH_VIEW_TYPES = new Set([
     'overview',
@@ -499,9 +499,19 @@ export const useTrustLandStore = create((set, get) => ({
             });
             set({
                 autonomousSteps: result.steps || [],
-                autonomousResult: result.recommendation || null,
+                autonomousResult: result.recommendation ? {
+                    ...result.recommendation,
+                    transactionId: result.transactionId || null,
+                    workflowTransactionId: result.workflowTransactionId || result.transactionId || null,
+                    workflowStatus: result.workflowStatus || null,
+                    nextRequiredWorkflowStep: result.nextRequiredWorkflowStep || null,
+                    paymentPurpose: result.paymentPurpose || null,
+                    paymentRequired: Boolean(result.paymentRequired),
+                } : null,
+                selectedTransactionId: result.transactionId || null,
                 isLoading: false,
             });
+            await get().fetchTransactions();
             await get().fetchTrustLedger();
         }
         catch (e) {

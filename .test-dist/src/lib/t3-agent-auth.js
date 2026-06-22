@@ -3,7 +3,7 @@
 // Provides: discovery, token exchange, refresh, introspection, JWKS
 // Each agent authenticates via @agent-auth/sdk against this server
 import { SignJWT, jwtVerify, importJWK } from 'jose';
-import { generateEd25519KeyPair, hashData, generateApiKey } from './t3-crypto';
+import { generateEd25519KeyPair, hashData, generateApiKey } from './t3-crypto.js';
 // ─── Jose Key Conversion Helpers ──────────────────────────────────────────────
 // jose v5+ requires CryptoKey/KeyObject/JWK for EdDSA — raw Uint8Array is rejected.
 // These helpers convert tweetnacl Ed25519 key pairs to/from jose-compatible JWK.

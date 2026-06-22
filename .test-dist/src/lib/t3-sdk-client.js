@@ -15,7 +15,7 @@
 // ─── PRIMARY: Import the real @agent-auth/sdk ────────────────────────────────
 import { AgentAuth, createAgentAuth } from '@agent-auth/sdk';
 // ─── SUPPORTING: Our own crypto for key generation and signing ───────────────
-import { signEd25519, verifyEd25519Signature, hashData, generateEd25519KeyPair, generateT3Did } from './t3-crypto';
+import { signEd25519, verifyEd25519Signature, hashData, generateEd25519KeyPair, generateT3Did } from './t3-crypto.js';
 // ─── SDK Bootstrap Logger ───────────────────────────────────────────────────
 // Makes it crystal-clear to judges that the SDK is loaded and active
 const SDK_BOOTSTRAP_LOG = {

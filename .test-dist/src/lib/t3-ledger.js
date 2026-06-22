@@ -1,7 +1,7 @@
 // TrustLand AI Network - Terminal 3 Verifiable Trust Ledger
 // Every entry is signed with real Ed25519 and attested by T3 Agent Auth
 // Flow: Action → T3 Attestation → Ed25519 Signed Proof → Trust Ledger
-import { signEd25519, verifyEd25519Signature, hashData } from './t3-crypto';
+import { signEd25519, verifyEd25519Signature, hashData } from './t3-crypto.js';
 // ─── Verifiable Trust Ledger ─────────────────────────────────────────────────
 class VerifiableTrustLedger {
     constructor() {

@@ -1,10 +1,10 @@
 // TrustLand AI Network - Backend Data & Logic
 // Complete backend with REAL Terminal 3 Agent Auth SDK integration
 // Uses real Ed25519 signing, JWT tokens, and verifiable credentials
-import { generateEd25519KeyPair, signEd25519, hashData as realHashData, generateT3Did, } from './t3-crypto';
-import t3AgentAuthServer from './t3-agent-auth';
-import t3VerifiableLedger from './t3-ledger';
-import { t3TEE } from './t3-tee';
+import { generateEd25519KeyPair, signEd25519, hashData as realHashData, generateT3Did, } from './t3-crypto.js';
+import t3AgentAuthServer from './t3-agent-auth.js';
+import t3VerifiableLedger from './t3-ledger.js';
+import { t3TEE } from './t3-tee.js';
 // ─── Key Store (for Ed25519 key pairs) ───────────────────────────────────────
 // In production, private keys would be in HSM/TEE. For demo, we keep them in-memory.
 const keyStore = new Map();
@@ -970,6 +970,53 @@ export const TRANSACTION_STAGES = [
     { key: 'transfer', label: 'Transfer', order: 8 },
     { key: 'completed', label: 'Completed', order: 9 },
 ];
+function syncWorkflowForTransactionStage(transactionId, nextStage, actorId, notes) {
+    const workflow = data.workflows.find((item) => item.transactionId === transactionId);
+    if (!workflow)
+        return null;
+    const stageIndex = TRANSACTION_STAGES.findIndex((stage) => stage.key === nextStage);
+    if (stageIndex === -1)
+        return workflow;
+    const now = new Date().toISOString();
+    workflow.currentState = nextStage;
+    workflow.status = nextStage === 'completed' ? 'completed' : 'active';
+    workflow.context = {
+        ...workflow.context,
+        currentTransactionStage: nextStage,
+        currentTransactionStageLabel: TRANSACTION_STAGES[stageIndex].label,
+        lastStageTransitionAt: now,
+        lastStageTransitionActorId: actorId,
+        lastStageTransitionNotes: notes || null,
+    };
+    if (workflow.context.autonomousPurchase === true && Array.isArray(workflow.steps)) {
+        workflow.steps.forEach((step, index) => {
+            if (index < stageIndex) {
+                step.status = 'completed';
+                step.startedAt = step.startedAt || now;
+                step.completedAt = step.completedAt || now;
+                step.outputData = step.outputData || {
+                    stage: TRANSACTION_STAGES[index]?.key || step.stepType,
+                    completed: true,
+                    autonomous: true,
+                };
+            }
+            else if (index === stageIndex) {
+                step.status = nextStage === 'completed' ? 'completed' : 'active';
+                step.startedAt = step.startedAt || now;
+                if (nextStage === 'completed') {
+                    step.completedAt = step.completedAt || now;
+                }
+            }
+            else if (step.status !== 'completed') {
+                step.status = 'pending';
+            }
+        });
+    }
+    if (nextStage === 'completed') {
+        workflow.completedAt = now;
+    }
+    return workflow;
+}
 export function advanceTransactionStage(transactionId, actorId, notes) {
     const tx = data.transactions.find(t => t.id === transactionId);
     if (!tx)
@@ -981,6 +1028,7 @@ export function advanceTransactionStage(transactionId, actorId, notes) {
     const nextStage = TRANSACTION_STAGES[currentStageIndex + 1];
     tx.status = nextStage.key;
     tx.updatedAt = new Date().toISOString();
+    syncWorkflowForTransactionStage(transactionId, nextStage.key, actorId, notes);
     // Create immutable event record
     const event = {
         id: crypto.randomUUID(),

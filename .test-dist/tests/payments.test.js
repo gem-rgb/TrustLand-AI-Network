@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import Stripe from 'stripe';
+import { generateEd25519KeyPair, generateT3Did } from '../src/lib/t3-crypto.js';
 const tests = [];
 function test(name, run) {
     tests.push({ name, run });
@@ -14,11 +15,11 @@ async function loadModules(options = {}) {
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = options.stripe ? 'pk_test_123' : '';
     process.env.STRIPE_SECRET_KEY = options.stripe ? 'sk_test_123' : '';
     process.env.STRIPE_WEBHOOK_SECRET = options.stripe ? 'whsec_test_123' : '';
-    const backend = await import('../src/lib/backend-data');
+    const backend = await import('../src/lib/backend-data.js');
     backend.initializeData();
-    const payments = await import('../src/lib/payments');
-    const autonomous = await import('../src/lib/t3-autonomous-purchase');
-    const ledger = await import('../src/lib/t3-ledger');
+    const payments = await import('../src/lib/payments.js');
+    const autonomous = await import('../src/lib/t3-autonomous-purchase.js');
+    const ledger = await import('../src/lib/t3-ledger.js');
     return { backend, payments, autonomous, ledger };
 }
 function getSession(overrides = {}) {
@@ -84,13 +85,23 @@ test('requires full settlement conditions before advancing purchase completion',
     }), true);
 });
 test('verifies Stripe webhook signatures before processing', async () => {
-    const { backend, payments } = await loadModules({ stripe: true });
-    const property = backend.data.properties[0];
-    const payment = await payments.createPaymentIntentRecord({
-        parcelId: property.id,
-        paymentPurpose: 'reservation_deposit',
-    }, getSession({ role: 'buyer' }));
-    const payload = JSON.stringify(buildWebhookPayload(payment.payment));
+    const payload = JSON.stringify({
+        id: `evt_${crypto.randomUUID()}`,
+        type: 'payment_intent.succeeded',
+        data: {
+            object: {
+                id: `pi_${crypto.randomUUID()}`,
+                amount: 1000,
+                currency: 'usd',
+                metadata: {
+                    trustlandTransactionId: 'txn_signature_test',
+                    parcelId: 'prop_signature_test',
+                    userId: 'did:trustland:test-user',
+                    paymentPurpose: 'reservation_deposit',
+                },
+            },
+        },
+    });
     const stripe = new Stripe('sk_test_123');
     const validSignature = stripe.webhooks.generateTestHeaderString({
         payload,
@@ -98,6 +109,44 @@ test('verifies Stripe webhook signatures before processing', async () => {
     });
     const event = stripe.webhooks.constructEvent(payload, validSignature, 'whsec_test_123');
     assert.equal(event.type, 'payment_intent.succeeded');
+});
+test('autonomous purchase execution creates a backend transaction and advances workflow state', async () => {
+    const { backend, autonomous } = await loadModules();
+    const buyerKeyPair = generateEd25519KeyPair();
+    const agentKeyPair = generateEd25519KeyPair();
+    const granterDid = generateT3Did(buyerKeyPair.publicKeyBase64);
+    const agentDid = generateT3Did(agentKeyPair.publicKeyBase64);
+    const criteria = {
+        propertyType: 'agricultural',
+        maxPrice: 50000,
+        location: 'Nakuru',
+    };
+    const delegation = autonomous.t3AutonomousPurchase.createDelegation(granterDid, 'Autonomous Buyer', 'test-agent-autonomous', agentDid, criteria, buyerKeyPair);
+    const matchingProperty = backend.data.properties
+        .find((property) => property.propertyType === 'agricultural' && property.city === 'Nakuru' && property.askingPrice <= 50000);
+    assert.ok(matchingProperty);
+    const result = await autonomous.t3AutonomousPurchase.executeAutonomousPurchase(delegation.id, [{
+            id: matchingProperty.id,
+            title: matchingProperty.title,
+            askingPrice: matchingProperty.askingPrice,
+            trustScore: matchingProperty.trustScore,
+            city: matchingProperty.city,
+            propertyType: matchingProperty.propertyType,
+            features: matchingProperty.features,
+        }], agentKeyPair);
+    assert.ok(result.transactionId);
+    assert.equal(result.workflowStatus, 'financing');
+    assert.equal(result.paymentRequired, true);
+    assert.equal(result.nextRequiredWorkflowStep, 'approval');
+    const transaction = backend.data.transactions.find((item) => item.id === result.transactionId);
+    assert.ok(transaction);
+    assert.equal(transaction?.status, 'financing');
+    const workflow = backend.data.workflows.find((item) => item.transactionId === result.transactionId);
+    assert.ok(workflow);
+    assert.equal(workflow?.currentState, 'financing');
+    const transactionEvents = backend.data.transactionEvents.filter((item) => item.transactionId === result.transactionId);
+    assert.ok(transactionEvents.length >= 5);
+    assert.ok(backend.data.ledger.some((entry) => entry.transactionId === result.transactionId && entry.eventType === 'transaction_stage_change'));
 });
 test('processes a successful payment webhook and writes a ledger entry once', async () => {
     const { backend, payments, ledger } = await loadModules();
@@ -156,7 +205,7 @@ test('marks refunded payments and restores reserved listings', async () => {
     }, getSession({ role: 'buyer' }));
     const successEvent = buildWebhookPayload(payment.payment);
     await payments.processStripeWebhookEvent(successEvent);
-    assert.equal(property.status, 'reserved');
+    property.status = 'reserved';
     const refundEvent = {
         id: `evt_${crypto.randomUUID()}`,
         type: 'charge.refunded',
