@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     webpackBuildWorker: false,
-    workerThreads: true,
+    workerThreads: false,
     cpus: 1,
   },
   typescript: {
