@@ -603,8 +603,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
 
       case 'properties/search': {
-        const { query, propertyType, propertyTypes, city, region, status, minPrice, maxPrice, bedrooms, features } = body;
-        result = filterProperties(data.properties, {
+        const { query, propertyType, propertyTypes, city, region, status, minPrice, maxPrice, bedrooms, bathrooms, features, garage, garden, cond, sync, source } = body;
+        const searchCriteria = {
           query: query || city || region,
           propertyType,
           propertyTypes,
@@ -614,8 +614,35 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           minPrice: typeof minPrice === 'number' ? minPrice : minPrice ? Number(minPrice) : undefined,
           maxPrice: typeof maxPrice === 'number' ? maxPrice : maxPrice ? Number(maxPrice) : undefined,
           bedrooms: typeof bedrooms === 'number' ? bedrooms : bedrooms ? Number(bedrooms) : undefined,
+          bathrooms: typeof bathrooms === 'number' ? bathrooms : bathrooms ? Number(bathrooms) : undefined,
           features: Array.isArray(features) ? features : undefined,
-        });
+          garage: Array.isArray(garage) ? garage : undefined,
+          garden: Array.isArray(garden) ? garden : undefined,
+          cond: Array.isArray(cond) ? cond : undefined,
+          source,
+        };
+        const results = filterProperties(data.properties, searchCriteria);
+        if (sync) {
+          addAuditLedgerEntry(
+            'property-search-agent',
+            'system',
+            'property_search_sync',
+            'properties',
+            typeof query === 'string' && query.trim() ? query.trim() : propertyTypes?.[0] || propertyType || 'all',
+            {
+              ...searchCriteria,
+              resultCount: results.length,
+              source: source || 'explore-properties',
+            }
+          );
+        }
+        result = {
+          results,
+          total: results.length,
+          syncedAt: new Date().toISOString(),
+          criteria: searchCriteria,
+          synced: Boolean(sync),
+        };
         break;
       }
 

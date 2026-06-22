@@ -28,7 +28,11 @@ export type PropertySearchFilters = {
   minPrice?: number | null;
   maxPrice?: number | null;
   bedrooms?: number | null;
+  bathrooms?: number | null;
   features?: string[];
+  garage?: string[];
+  garden?: string[];
+  cond?: string[];
 };
 
 const ROLE_VIEW_ACCESS: Record<DashboardRole, Set<string>> = {
@@ -83,6 +87,21 @@ const PROPERTY_STATUS_GROUPS: Record<string, string[]> = {
 
 function normalizeText(value: string) {
   return value.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function matchesFeature(property: SearchableProperty, keywords: string[]) {
+  const propertyFeatures = (property.features || []).map((feature) => normalizeText(feature));
+  return keywords.some((keyword) => propertyFeatures.some((feature) => feature.includes(keyword)));
+}
+
+function inferPropertyCondition(property: SearchableProperty) {
+  const yearBuilt = property.yearBuilt ?? undefined;
+  if (!yearBuilt) return 'good';
+
+  const age = new Date().getFullYear() - yearBuilt;
+  if (age <= 5) return 'new';
+  if (age <= 15) return 'good';
+  return 'renovation needed';
 }
 
 export function deriveDashboardRole(roleLike?: string | null): DashboardRole {
@@ -170,6 +189,9 @@ export function filterProperties<T extends SearchableProperty>(properties: T[], 
     ...(filters.propertyType ? [filters.propertyType] : []),
   ].map(normalizePropertyType).filter(Boolean);
   const features = (filters.features || []).map(normalizeText).filter(Boolean);
+  const garage = (filters.garage || []).map(normalizeText).filter(Boolean);
+  const garden = (filters.garden || []).map(normalizeText).filter(Boolean);
+  const conditions = (filters.cond || []).map(normalizeText).filter(Boolean);
   const city = filters.city?.trim() || '';
   const region = filters.region?.trim() || '';
   const status = filters.status?.trim() || '';
@@ -184,13 +206,28 @@ export function filterProperties<T extends SearchableProperty>(properties: T[], 
     if (propertyTypes.length && !propertyTypes.some((type) => matchesPropertyType(property.propertyType, type))) return false;
     const askingPrice = property.askingPrice ?? 0;
     if (filters.minPrice != null && askingPrice < filters.minPrice) return false;
-    if (filters.maxPrice != null && askingPrice > filters.maxPrice) return false;
-    if (filters.bedrooms != null && (property.bedrooms ?? 0) < filters.bedrooms) return false;
-    if (features.length) {
+  if (filters.maxPrice != null && askingPrice > filters.maxPrice) return false;
+  if (filters.bedrooms != null && (property.bedrooms ?? 0) < filters.bedrooms) return false;
+  if (filters.bathrooms != null && (property.bathrooms ?? 0) < filters.bathrooms) return false;
+  if (features.length) {
       const propertyFeatures = (property.features || []).map((feature) => feature.toLowerCase());
       if (!features.some((feature) => propertyFeatures.some((propertyFeature) => propertyFeature.includes(feature)))) {
         return false;
       }
+    }
+    if (garage.length) {
+      const hasGarage = matchesFeature(property, ['garage', 'parking', 'carport']);
+      if (garage.includes('yes') && !hasGarage) return false;
+      if (garage.includes('no') && hasGarage) return false;
+    }
+    if (garden.length) {
+      const hasGarden = matchesFeature(property, ['garden', 'landscap', 'yard', 'lawn', 'backyard']);
+      if (garden.includes('yes') && !hasGarden) return false;
+      if (garden.includes('no') && hasGarden) return false;
+    }
+    if (conditions.length) {
+      const actualCondition = inferPropertyCondition(property);
+      if (!conditions.some((condition) => actualCondition === condition)) return false;
     }
     return true;
   });
